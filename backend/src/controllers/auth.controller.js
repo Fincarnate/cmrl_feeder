@@ -1,7 +1,6 @@
-
 const bcrypt = require("bcrypt");
-const pool = require("../config/db");
-const { generateToken } = require("../utils/jwt");
+const pool = require("../database/db");
+const { generateToken } = require("../utils/jwt..js");
 
 // REGISTER
 async function register(req, res) {
