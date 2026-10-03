@@ -23,4 +23,11 @@ app.use("/api/auth", authRoutes);
 
 app.use("/api/admin", adminRoutes);
 
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    message: "Route not found"
+  });
+});
+
 module.exports = app;
