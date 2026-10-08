@@ -1,11 +1,12 @@
+// jwt.js generates a jwt only after successful login.
+// also exports a function that checks for jwt validity
+
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
 
-// Generate a token after successful login
 function generateToken(admin) {
     const payload = {
-        accountId: admin.account_id,
-        name: admin.name,
+        adminId: admin.id,
         email: admin.email,
         role: admin.role
     };
@@ -15,7 +16,6 @@ function generateToken(admin) {
     });
 }
 
-// Verify a token received from a client
 function verifyToken(token) {
     return jwt.verify(token, config.jwt.secret);
 }

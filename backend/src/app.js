@@ -1,26 +1,30 @@
+// Application-related code
 
-const express = require("express");
-const cors = require("cors");
+const Fastify = require("fastify");
+const cors = require("@fastify/cors");
 
-const authRoutes = require("./routes/auth.routes");
-const adminRoutes = require("./routes/admin.routes");
+const authRoutes = require("./modules/auth/authRoutes");
 
-const app = express();
+function buildApp() {
+    const app = Fastify({       // Creates server appplication with logger enabled.
+        logger: true
+    });
 
-app.use(express.json({ limit: "10kb" }));
+    app.register(cors, {        // @fastify/cors allows your development frontend at http://localhost:5173 to make browser requests.
+        origin: "http://localhost:5173"
+    });
 
-app.use(cors({
-  origin: "http://localhost:5173"
-}));
+    app.get("/health", async () => {        // checking if it works
+        return {
+            status: "ok"
+        };
+    });
 
-app.get("/", (req, res) => {
-  res.json({
-    message: "CMRL Feeder API is running"
-  });
-});
+    app.register(authRoutes, {
+        prefix: "/api/auth"
+    });
 
-app.use("/api/auth", authRoutes);
+    return app;
+}
 
-app.use("/api/admin", adminRoutes);
-
-module.exports = app;
+module.exports = buildApp;
