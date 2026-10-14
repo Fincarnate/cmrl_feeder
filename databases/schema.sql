@@ -12,12 +12,14 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 
--- Metro station
+-- Metro station (changed logic)
 
 CREATE TABLE metro_station (
     station_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     station_name VARCHAR(100) NOT NULL,
     station_coords GEOMETRY(Point, 4326),
+    service_boundary_polygon GEOMETRY(Polygon, 4326),
+
     feeder_bay_number INT,
     is_active BOOLEAN DEFAULT TRUE
 );

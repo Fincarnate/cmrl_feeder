@@ -1,11 +1,10 @@
 import { useState } from "react";
 
-function LoginPage() {
+function LoginPage({ onLogin }) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [admin, setAdmin] = useState(null);
 
     async function handleSubmit(event) {
         event.preventDefault();
@@ -30,8 +29,8 @@ function LoginPage() {
 
             localStorage.setItem("authToken", data.token);
             localStorage.setItem("admin", JSON.stringify(data.admin));
-            setAdmin(data.admin);
             setPassword("");
+            onLogin({ token: data.token, admin: data.admin });
         } catch {
             setError("Unable to reach the server. Please try again later.");
         } finally {
@@ -45,12 +44,6 @@ function LoginPage() {
                 <h1>CMRL Feeder</h1>
                 <p>Admin Dashboard Login</p>
 
-                {admin ? (
-                    <div className="login-success" role="status">
-                        Logged in as {admin.name}.
-                    </div>
-                ) : null}
-
                 <form onSubmit={handleSubmit}>
                     <label htmlFor="email">Email</label>
                     <input
@@ -62,7 +55,7 @@ function LoginPage() {
                         }
                         placeholder="Enter your admin email"
                         required
-                        disabled={isSubmitting || Boolean(admin)}
+                        disabled={isSubmitting}
                     />
 
                     <label htmlFor="password">Password</label>
@@ -75,7 +68,7 @@ function LoginPage() {
                         }
                         placeholder="Enter your password"
                         required
-                        disabled={isSubmitting || Boolean(admin)}
+                        disabled={isSubmitting}
                     />
 
                     {error ? (
@@ -84,7 +77,7 @@ function LoginPage() {
                         </p>
                     ) : null}
 
-                    <button type="submit" disabled={isSubmitting || Boolean(admin)}>
+                    <button type="submit" disabled={isSubmitting}>
                         {isSubmitting ? "Logging in..." : "Login"}
                     </button>
                 </form>

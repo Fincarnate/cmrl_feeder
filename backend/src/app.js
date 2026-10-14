@@ -4,6 +4,7 @@ const Fastify = require("fastify");
 const cors = require("@fastify/cors");
 
 const authRoutes = require("./modules/auth/authRoutes");
+const dashboardRoutes = require("./modules/dashboard/dashboardRoutes");
 
 function buildApp() {
     const app = Fastify({       // Creates server appplication with logger enabled.
@@ -22,6 +23,10 @@ function buildApp() {
 
     app.register(authRoutes, {
         prefix: "/api/auth"
+    });
+
+    app.register(dashboardRoutes, {
+        prefix: "/api/dashboard"
     });
 
     return app;
