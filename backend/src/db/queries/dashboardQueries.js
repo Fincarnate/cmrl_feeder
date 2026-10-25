@@ -38,11 +38,19 @@ async function getDashboardMapData() {
       SELECT
         COALESCE((SELECT json_agg(json_build_object('id', station_id, 'name', station_name,
           'coordinates', CASE WHEN station_coords IS NULL THEN NULL ELSE ST_AsGeoJSON(station_coords)::json END,
-          'boundary', CASE WHEN service_boundary_polygon IS NULL THEN NULL ELSE ST_AsGeoJSON(service_boundary_polygon)::json END)) FROM metro_station WHERE is_active = TRUE), '[]'::json) AS stations,
+          'boundary', CASE WHEN service_boundary_polygon IS NULL THEN NULL ELSE ST_AsGeoJSON(service_boundary_polygon)::json END,
+          'serviceArea',CASE WHEN service_area_polygon IS NULL THEN NULL ELSE ST_AsGeoJSON(service_area_polygon)::json END,
+          'serviceRadiusKm',service_radius_km,'geofenceRadiusMeters',station_geofence_radius_m,
+          'geofenceSource',station_geofence_source,'serviceAreaSource',service_area_source)) FROM metro_station WHERE is_active = TRUE), '[]'::json) AS stations,
         COALESCE((SELECT json_agg(json_build_object('id', zone_id, 'name', zone_name, 'stationId', station_id,
-          'boundary', CASE WHEN boundary_polygon IS NULL THEN NULL ELSE ST_AsGeoJSON(boundary_polygon)::json END)) FROM service_zone WHERE is_active = TRUE), '[]'::json) AS zones,
+          'boundary', CASE WHEN boundary_polygon IS NULL THEN NULL ELSE ST_AsGeoJSON(boundary_polygon)::json END,
+          'center',CASE WHEN center_coords IS NULL THEN NULL ELSE ST_AsGeoJSON(center_coords)::json END,
+          'radiusKm',service_radius_km,'boundarySource',boundary_source)) FROM service_zone WHERE is_active = TRUE), '[]'::json) AS zones,
         COALESCE((SELECT json_agg(json_build_object('id', point_id, 'name', point_name, 'zoneId', zone_id,
-          'coordinates', CASE WHEN location_coords IS NULL THEN NULL ELSE ST_AsGeoJSON(location_coords)::json END)) FROM service_point WHERE is_active = TRUE), '[]'::json) AS service_points,
+          'coordinates', CASE WHEN location_coords IS NULL THEN NULL ELSE ST_AsGeoJSON(location_coords)::json END,
+          'verificationStatus',verification_status,'coordinateSource',coordinate_source,'active',is_active,
+          'bookable',is_active AND verification_status='VERIFIED' AND location_coords IS NOT NULL AND
+            EXISTS(SELECT 1 FROM service_zone sz WHERE sz.zone_id=service_point.zone_id AND ST_Covers(sz.boundary_polygon,service_point.location_coords)))) FROM service_point), '[]'::json) AS service_points,
         COALESCE((SELECT json_agg(json_build_object('id', d.driver_id, 'name', d.full_name, 'recordedAt', d.location_recorded_at,
           'coordinates', ST_AsGeoJSON(d.current_location)::json)) FROM driver d
           WHERE d.is_online=TRUE AND d.current_location IS NOT NULL AND d.location_recorded_at > clock_timestamp() -

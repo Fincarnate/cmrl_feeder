@@ -12,11 +12,19 @@ Create Postgres with PostGIS, then apply schema and migrations in order:
 psql -U postgres -d cmrl_feeder -f databases/schema.sql
 psql -U postgres -d cmrl_feeder -f databases/migrations/001_account_credentials.sql
 psql -U postgres -d cmrl_feeder -f databases/migrations/002_drt_engine.sql
+psql -U postgres -d cmrl_feeder -f databases/migrations/003_passenger_journey.sql
+psql -U postgres -d cmrl_feeder -f databases/migrations/004_configurable_geographic_service_area.sql
 ```
+
+Configure the geographic pilot values in `backend/.env` (see `backend/.env.example`), then run `npm run seed:thirumangalam` from `backend`. The seed uses the configured PostgreSQL pool, validates every coordinate and radius before connecting, and can be safely rerun after changing a configuration-managed radius. It preserves existing verified/official geometries and aborts transactionally on ambiguous names or invalid/out-of-catchment geometry.
 
 Migration `002` adds operational fields, indexes, audit events, and versioned fare and operating policies. Its development fare defaults (INR 20 base, INR 8/km, INR 25 minimum, zero fee) are configurable by an authenticated administrator and are not intended as permanent commercial rates. Peak fare multipliers default to `1.0`. The default policy uses Asia/Kolkata, daily service, peak windows 07:00–10:00 and 16:30–20:30, 5/8 minute dispatch waits, 2/4 minute boarding grace, and a five-minute OTP validity. Policies are versioned and timing snapshots are stored when a trip or boarding timer starts.
 
 The fare distance is an estimated straight-line geographic distance because no road-routing provider is configured. It is labeled as an estimate in the API and UI. The application calculates fare only; it does not create payments.
+
+Passenger location is requested only after a travel direction is selected. Location resolution uses longitude/latitude in EPSG:4326 and PostGIS `ST_Covers`; nearest residential-zone recommendations use geodesic distance from the reported point to each eligible polygon (`ST_Distance(geometry::geography, point::geography)`). The passenger must confirm an out-of-zone pickup recommendation. Migration `003` records booking intent and the origin GPS/manual provenance. Migration `004` keeps a 16 km service catchment separate from the 300 m physical station geofence, adds service-zone center/radius metadata, and tracks service-point verification. The pilot circles are approximate configuration-managed buffers, not official or surveyed boundaries. At the user's request, the seed adds five active, verified road-reference points per zone (plus the unverified center reference). The arbitrary road references are at least 300 m apart and are intended for testing, not surveyed pickup recommendations.
+
+`Booking` creates a regular shared DRT queue request. `Direct Booking` attempts to reserve a fresh online driver and eligible vehicle atomically; it returns an unavailable response without creating a queued booking when no immediate assignment is possible. Both confirm a server-signed, five-minute fare quote and do not initiate payment.
 
 Create an admin when needed by setting `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`, then running `node src/scripts/create-admin.js` from `backend`. Driver registration requires the real vehicle passenger capacity; the operating policy caps which registered vehicles can be dispatched.
 
@@ -29,6 +37,7 @@ Run `npm run dev` in `backend` and `npm run dev` in `frontend`. The frontend API
 All endpoints use bearer JWT authentication. Passenger routes require a passenger identity, driver routes require a driver identity, and dashboard/policy routes require an admin identity.
 
 - `GET /api/bookings/service-areas`
+- `POST /api/bookings/location-resolution` (direction plus numeric latitude/longitude)
 - `POST /api/bookings/fare-preview`
 - `POST /api/bookings` (optional `Idempotency-Key` header)
 - `GET /api/bookings`, `GET /api/bookings/:id`, `POST /api/bookings/:id/cancel`, `GET /api/bookings/:id/otp`

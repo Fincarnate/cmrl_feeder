@@ -72,6 +72,25 @@ button, input { font: inherit; }
 .operations-table th, .operations-table td { padding: 9px 7px; border-bottom: 1px solid #eaecf0; text-align: left; vertical-align: top; }
 .policy-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
 .policy-grid label { display: grid; gap: 5px; color: #475467; font-size: 12px; }
+.journey-choice-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 14px 0; }
+.journey-choice { min-height: 54px; padding: 10px 14px; border: 1px solid #cfd7e3; border-radius: 9px; color: #344054; background: white; text-align: left; cursor: pointer; font-weight: 650; }
+.journey-choice.selected { border-color: #175cd3; color: #173b68; background: #eff8ff; box-shadow: 0 0 0 2px #d1e9ff; }
+.journey-choice small { display: block; margin-top: 4px; color: #667085; font-size: 11px; font-weight: 400; }
+.mode-choices { margin-top: 8px; }
+.location-status { margin: 14px 0; padding: 12px 14px; border: 1px solid #b2ddff; border-radius: 9px; color: #1849a9; background: #eff8ff; }
+.location-status p { margin: 0; font-size: 14px; line-height: 1.5; }
+.location-status.error { border-color: #fecdca; color: #b42318; background: #fef3f2; }
+.location-status .form-actions { margin-top: 10px; }
+.acknowledge-pickup { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding: 12px; border-radius: 8px; color: #7a2e0e; background: #fffaeb; font-size: 13px; }
+.acknowledge-pickup input { margin-top: 2px; }
+.fare-card { margin-top: 16px; padding: 15px; border: 1px solid #d1e9ff; border-radius: 10px; background: #f5faff; }
+.fare-card h3 { margin: 0 0 8px; color: #173b68; font-size: 17px; }
+.fare-card p { margin: 6px 0; color: #475467; font-size: 13px; line-height: 1.5; }
+.fare-card small { color: #667085; }
+.legend-gps { background: #84caff; border: 2px solid #175cd3; }
+.legend-catchment { width: 18px !important; height: 0 !important; border-top: 2px dashed #1570ef; border-radius: 0 !important; }
+.legend-reference { background: #d0d5dd; border: 1px solid #667085; }
+@media (max-width: 560px) { .journey-choice-grid { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .dashboard-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .drt-form-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.admin-data-grid { grid-template-columns: 1fr; }.policy-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 560px) { .login-card { padding: 24px 20px; }.dashboard-page { padding: 14px 12px 24px; }.dashboard-header { align-items: flex-start; }.dashboard-header h1 { font-size: 20px; }.dashboard-header button { padding: 9px 11px; }.dashboard-stats { gap: 10px; }.dashboard-stats article { padding: 14px; }.dashboard-stats strong { font-size: 25px; }.service-map { min-height: 340px; height: 55vh; }.map-legend { gap: 10px 14px; }.drt-panel { padding: 15px; }.drt-form-grid { grid-template-columns: 1fr; }.booking-list article,.driver-booking { flex-direction: column; align-items: stretch; }.booking-actions { align-self: stretch; }.driver-booking > div { flex-wrap: wrap; }.policy-grid { grid-template-columns: 1fr 1fr; } }

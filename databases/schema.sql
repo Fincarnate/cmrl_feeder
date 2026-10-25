@@ -19,6 +19,13 @@ CREATE TABLE metro_station (
     station_name VARCHAR(100) NOT NULL,
     station_coords GEOMETRY(Point, 4326),
     service_boundary_polygon GEOMETRY(Polygon, 4326),
+    service_area_polygon GEOMETRY(Polygon, 4326),
+    service_radius_km NUMERIC(8,2),
+    station_geofence_radius_m NUMERIC(8,2),
+    service_area_source VARCHAR(40),
+    station_center_source VARCHAR(80),
+    station_geofence_source VARCHAR(40),
+    geometry_updated_at TIMESTAMPTZ,
 
     feeder_bay_number INT,
     is_active BOOLEAN DEFAULT TRUE
@@ -33,6 +40,11 @@ CREATE TABLE service_zone (
     zone_name VARCHAR(100) NOT NULL,
     zone_type VARCHAR(20),
     boundary_polygon GEOMETRY(Polygon, 4326),
+    center_coords GEOMETRY(Point,4326),
+    service_radius_km NUMERIC(8,2),
+    boundary_source VARCHAR(40),
+    center_source VARCHAR(80),
+    geometry_updated_at TIMESTAMPTZ,
     distance_to_metro_km DECIMAL(6,2),
     has_unassigned_queue BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
@@ -84,6 +96,9 @@ CREATE TABLE service_point (
     road_access_status VARCHAR(30),
     is_hub_stop BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
+    verification_status VARCHAR(20) NOT NULL DEFAULT 'UNVERIFIED' CHECK (verification_status IN ('UNVERIFIED','VERIFIED')),
+    coordinate_source VARCHAR(80),
+    CONSTRAINT service_point_verified_source_required CHECK (verification_status <> 'VERIFIED' OR coordinate_source IS NOT NULL),
 
     CONSTRAINT fk_point_zone
         FOREIGN KEY (zone_id)

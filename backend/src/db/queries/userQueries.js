@@ -17,7 +17,9 @@ async function findServiceOptionsForLocation(latitude, longitude) {
                         'point_id', sp.point_id,
                         'point_name', sp.point_name,
                         'road_access_status', sp.road_access_status,
-                        'is_hub_stop', sp.is_hub_stop
+                        'is_hub_stop', sp.is_hub_stop,
+                        'verification_status',sp.verification_status,
+                        'coordinate_source',sp.coordinate_source
                     ) ORDER BY sp.point_name
                 ) FILTER (WHERE sp.point_id IS NOT NULL),
                 '[]'::json
@@ -30,17 +32,16 @@ async function findServiceOptionsForLocation(latitude, longitude) {
         LEFT JOIN service_point sp
           ON sp.zone_id = sz.zone_id
          AND sp.is_active = TRUE
+         AND sp.verification_status = 'VERIFIED'
          AND sp.location_coords IS NOT NULL
          AND ST_Covers(sz.boundary_polygon, sp.location_coords)
 
         WHERE ms.is_active = TRUE
           AND sz.is_active = TRUE
-          AND ms.service_boundary_polygon IS NOT NULL
+          AND ms.service_area_polygon IS NOT NULL
           AND sz.boundary_polygon IS NOT NULL
-          AND ST_Covers(
-              ms.service_boundary_polygon,
-              sz.boundary_polygon
-          )
+          AND sz.center_coords IS NOT NULL
+          AND ST_Covers(ms.service_area_polygon,sz.center_coords)
           AND ST_Covers(
               sz.boundary_polygon,
               ST_SetSRID(ST_MakePoint($1, $2), 4326)
@@ -78,17 +79,19 @@ async function createServiceRequest(data) {
           AND ms.station_id = $4
           AND ms.is_active = TRUE
           AND sz.is_active = TRUE
-          AND ms.service_boundary_polygon IS NOT NULL
+          AND ms.service_area_polygon IS NOT NULL
           AND sz.boundary_polygon IS NOT NULL
-          AND ST_Covers(ms.service_boundary_polygon, sz.boundary_polygon)
+          AND sz.center_coords IS NOT NULL
+          AND ST_Covers(ms.service_area_polygon,sz.center_coords)
           AND (
-              $6::uuid IS NULL
-              OR EXISTS (
+              $6::uuid IS NOT NULL
+              AND EXISTS (
                   SELECT 1
                   FROM service_point sp
                   WHERE sp.point_id = $6
                     AND sp.zone_id = sz.zone_id
                     AND sp.is_active = TRUE
+                    AND sp.verification_status='VERIFIED'
                     AND sp.location_coords IS NOT NULL
                     AND ST_Covers(sz.boundary_polygon, sp.location_coords)
               )

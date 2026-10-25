@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed:thirumangalam": "node src/scripts/seed-thirumangalam.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

@@ -22,6 +22,9 @@ test("PostgreSQL/PostGIS DRT schema and authenticated API integration", { skip: 
     assert.equal(rows[0].database, process.env.DB_NAME);
     assert.match(rows[0].postgis, /POSTGIS=/i);
     assert.ok(rows[0].fare_policy && rows[0].operating_policy && rows[0].engine_events);
+    const journeyColumns = await pool.query(`SELECT COUNT(*)::int AS count FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='booking' AND column_name IN ('booking_intent','origin_location','origin_location_source','gps_verified_at','pickup_acknowledged')`);
+    assert.equal(journeyColumns.rows[0].count, 5);
 
     const policies = await policyQueries.listPolicies();
     assert.equal(Number(policies.fare.version) > 0, true);
@@ -43,6 +46,12 @@ test("PostgreSQL/PostGIS DRT schema and authenticated API integration", { skip: 
     assert.equal(policyResponse.statusCode, 200);
     const areaResponse = await app.inject({ method: "GET", url: "/api/bookings/service-areas", headers: { authorization: `Bearer ${generateToken({ id: "44444444-4444-4444-8444-444444444444", email: "passenger@example.invalid", role: "PASSENGER" })}` } });
     assert.equal(areaResponse.statusCode, 200);
+    const passengerAuth = { authorization: `Bearer ${generateToken({ id: "44444444-4444-4444-8444-444444444444", email: "passenger@example.invalid", role: "PASSENGER" })}` };
+    const invalidLocation = await app.inject({ method: "POST", url: "/api/bookings/location-resolution", headers: passengerAuth, payload: { direction: "RESIDENTIAL_TO_METRO", latitude: 91, longitude: 80 } });
+    assert.equal(invalidLocation.statusCode, 400);
+    const locationCheck = await app.inject({ method: "POST", url: "/api/bookings/location-resolution", headers: passengerAuth, payload: { direction: "METRO_TO_RESIDENTIAL", latitude: 13.08, longitude: 80.27 } });
+    assert.equal(locationCheck.statusCode, 200);
+    assert.ok(["AT_SUPPORTED_STATION", "OUTSIDE_STATION"].includes(locationCheck.json().result));
     const unsupported = await app.inject({
         method: "POST", url: "/api/bookings/fare-preview",
         headers: { authorization: `Bearer ${generateToken({ id: "44444444-4444-4444-8444-444444444444", email: "passenger@example.invalid", role: "PASSENGER" })}` },

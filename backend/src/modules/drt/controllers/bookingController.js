@@ -13,6 +13,11 @@ async function previewFare(request, reply) {
     catch(error) { return reply.code(error.statusCode || 500).send({message:error.statusCode?error.message:"Unable to calculate fare."}); }
 }
 
+async function resolveLocation(request, reply) {
+    try { return reply.send(await bookingService.resolveLocation(request.body || {})); }
+    catch(error) { return reply.code(error.statusCode || 500).send({message:error.statusCode?error.message:"Unable to validate this location."}); }
+}
+
 async function createBooking(request, reply) {
     try {
         const booking = await bookingService.createBooking(userId(request),{...(request.body||{}),idempotencyKey:request.headers["idempotency-key"]});
@@ -51,4 +56,4 @@ async function getOtp(request, reply) {
     catch(error) { return reply.code(error.statusCode || 500).send({message:error.statusCode?error.message:"Unable to retrieve boarding OTP."}); }
 }
 
-module.exports = { serviceAreas, previewFare, createBooking, listBookings, getBooking, cancelBooking, getOtp };
+module.exports = { serviceAreas, resolveLocation, previewFare, createBooking, listBookings, getBooking, cancelBooking, getOtp };

@@ -3,6 +3,7 @@ const controller = require("../controllers/bookingController");
 
 async function bookingRoutes(fastify) {
     fastify.get("/service-areas", { preHandler:authenticateIdentity("PASSENGER") }, controller.serviceAreas);
+    fastify.post("/location-resolution", { preHandler:authenticateIdentity("PASSENGER") }, controller.resolveLocation);
     fastify.post("/fare-preview", { preHandler:authenticateIdentity("PASSENGER") }, controller.previewFare);
     fastify.post("/", { preHandler:authenticateIdentity("PASSENGER") }, controller.createBooking);
     fastify.get("/", { preHandler:authenticateIdentity("PASSENGER") }, controller.listBookings);
