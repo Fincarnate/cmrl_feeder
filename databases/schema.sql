@@ -78,6 +78,7 @@ CREATE TABLE driver (
     driving_license_no VARCHAR(50) UNIQUE NOT NULL,
     current_service_mode VARCHAR(30),
     shift_status VARCHAR(30),
+      location_accuracy_m NUMERIC(8,2) CHECK (location_accuracy_m IS NULL OR location_accuracy_m >= 0),
     kyc_type VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -177,10 +178,23 @@ CREATE TABLE booking (
 CREATE TABLE trip_stop_sequence (
     stop_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL,
-    point_id UUID NOT NULL,
+    point_id UUID,
     stop_sequence INT NOT NULL,
     scheduled_eta TIMESTAMP,
     stop_status VARCHAR(30),
+      arrived_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      stop_type VARCHAR(20) NOT NULL DEFAULT 'SERVICE_POINT',
+      station_id UUID REFERENCES metro_station(station_id),
+      stop_result VARCHAR(40),
+      stop_result_at TIMESTAMPTZ,
+
+    CONSTRAINT trip_stop_target_matches_type CHECK (
+      (stop_type='SERVICE_POINT' AND point_id IS NOT NULL AND station_id IS NULL) OR
+      (stop_type='STATION' AND station_id IS NOT NULL AND point_id IS NULL)
+    ),
+    CONSTRAINT trip_stop_type_valid CHECK (stop_type IN ('SERVICE_POINT','STATION')),
+    CONSTRAINT trip_stop_result_valid CHECK (stop_result IS NULL OR stop_result IN ('NO_SCHEDULED_PASSENGER','PASSENGERS_RESOLVED','DESTINATIONS_COMPLETED')),
 
     CONSTRAINT fk_stop_trip
         FOREIGN KEY (trip_id)

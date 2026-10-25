@@ -19,7 +19,9 @@ async function resolveOneNoShow() {
             WHERE t.trip_id=$1`,[booking.trip_id]);
         await client.query("INSERT INTO drt_engine_event(event_type,trip_id,booking_id,actor_role) VALUES('PASSENGER_NO_SHOW',$1,$2,'SYSTEM')",[booking.trip_id,booking.booking_id]);
         const remainingAtStop=await client.query("SELECT 1 FROM booking WHERE trip_id=$1 AND service_point_id=$2 AND UPPER(booking_status) IN ('ASSIGNED','BOARDING','IN_PROGRESS') LIMIT 1",[booking.trip_id,booking.service_point_id]);
-        if(!remainingAtStop.rows[0]) await client.query("UPDATE trip_stop_sequence SET completed_at=clock_timestamp(),stop_status='SKIPPED' WHERE trip_id=$1 AND point_id=$2 AND stop_type='SERVICE_POINT' AND arrived_at IS NULL",[booking.trip_id,booking.service_point_id]);
+        if(!remainingAtStop.rows[0]) await client.query(`UPDATE trip_stop_sequence s SET completed_at=clock_timestamp(),stop_status='SKIPPED'
+            WHERE s.trip_id=$1 AND s.point_id=$2 AND s.stop_type='SERVICE_POINT' AND s.arrived_at IS NULL
+              AND EXISTS(SELECT 1 FROM trip t WHERE t.trip_id=s.trip_id AND t.trip_direction='METRO_TO_RESIDENTIAL')`,[booking.trip_id,booking.service_point_id]);
         const active=await client.query("SELECT 1 FROM booking WHERE trip_id=$1 AND UPPER(booking_status) IN ('REQUESTED','ASSIGNED','BOARDING','IN_PROGRESS') LIMIT 1",[booking.trip_id]);
         if(!active.rows[0]) {
             await client.query("UPDATE trip_stop_sequence SET completed_at=COALESCE(completed_at,clock_timestamp()),stop_status='SKIPPED' WHERE trip_id=$1 AND completed_at IS NULL",[booking.trip_id]);

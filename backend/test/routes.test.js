@@ -33,3 +33,11 @@ test("driver telemetry validates coordinates before database access", async t =>
     });
     assert.equal(response.statusCode, 400);
 });
+
+test("driver workflow endpoints are protected and validate mode before database access",async t=>{
+    const app=buildApp();t.after(()=>app.close());await app.ready();
+    const missing=await app.inject({method:"GET",url:"/api/drivers/service-mode"});assert.equal(missing.statusCode,401);
+    const token=generateToken({id:"22222222-2222-4222-8222-222222222222",email:"driver@example.invalid",role:"DRIVER"});
+    const invalid=await app.inject({method:"POST",url:"/api/drivers/service-mode",headers:{authorization:`Bearer ${token}`},payload:{mode:"ANYWHERE"}});assert.equal(invalid.statusCode,400);
+    const zone=await app.inject({method:"POST",url:"/api/drivers/active-zone",headers:{authorization:`Bearer ${token}`},payload:{zoneId:"bad"}});assert.equal(zone.statusCode,400);
+});

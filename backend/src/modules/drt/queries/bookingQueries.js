@@ -214,7 +214,8 @@ async function cancelMyBooking(userId, bookingId) {
         const remainingAtPoint = await client.query(`SELECT 1 FROM booking WHERE trip_id=$1 AND service_point_id=$2
           AND UPPER(booking_status) IN ${ACTIVE_BOOKING_STATES} LIMIT 1`, [booking.trip_id,booking.service_point_id]);
         if (!remainingAtPoint.rows[0]) await client.query(`UPDATE trip_stop_sequence SET completed_at=clock_timestamp(),stop_status='SKIPPED'
-          WHERE trip_id=$1 AND point_id=$2 AND stop_type='SERVICE_POINT' AND arrived_at IS NULL`, [booking.trip_id,booking.service_point_id]);
+          WHERE trip_id=$1 AND point_id=$2 AND stop_type='SERVICE_POINT' AND arrived_at IS NULL
+            AND EXISTS(SELECT 1 FROM trip t WHERE t.trip_id=trip_stop_sequence.trip_id AND t.trip_direction='METRO_TO_RESIDENTIAL')`, [booking.trip_id,booking.service_point_id]);
         const remaining = await client.query(`SELECT COUNT(*)::int AS count FROM booking WHERE trip_id=$1 AND UPPER(booking_status) IN ${ACTIVE_BOOKING_STATES}`, [booking.trip_id]);
         if (Number(remaining.rows[0].count) === 0) {
             await client.query("UPDATE trip SET trip_status='CANCELLED',updated_at=clock_timestamp() WHERE trip_id=$1 AND trip_status IN ('WAITING_FOR_PASSENGERS','READY_TO_DISPATCH','DISPATCHED')", [booking.trip_id]);

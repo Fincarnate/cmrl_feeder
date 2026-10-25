@@ -2,6 +2,7 @@ const pool = require("../../../db/pool");
 const policyQueries = require("../queries/policyQueries");
 const { dispatchDecision } = require("./dispatchRules");
 const { assertTransition } = require("./bookingStates");
+const config = require("../../../config/env");
 
 async function dispatchOne() {
     const client = await pool.connect();
@@ -16,9 +17,12 @@ async function dispatchOne() {
           WHERE t.trip_status='WAITING_FOR_PASSENGERS' AND (t.dispatch_deadline<=clock_timestamp() OR EXISTS(
             SELECT 1 FROM driver d JOIN vehicle v ON v.driver_id=d.driver_id
             WHERE d.is_online=TRUE AND UPPER(COALESCE(d.shift_status,'')) IN ('AVAILABLE','ONLINE')
+              AND (CASE UPPER(TRIM(d.current_service_mode)) WHEN 'R2M' THEN 'RESIDENTIAL_TO_METRO' WHEN 'M2R' THEN 'METRO_TO_RESIDENTIAL' ELSE UPPER(TRIM(d.current_service_mode)) END)=t.trip_direction
               AND d.current_location IS NOT NULL AND d.location_recorded_at>clock_timestamp()-(COALESCE((t.dispatch_policy->>'driverLocationMaxAgeSeconds')::int,90)*interval '1 second')
+              AND d.location_accuracy_m IS NOT NULL AND d.location_accuracy_m<=${Number(config.drtStopArrivalRadiusM)}
               AND v.is_active=TRUE AND COALESCE(v.is_frozen_until,FALSE)=FALSE
-              AND v.max_capacity=COALESCE(demand.demand_seats,0)
+              AND v.max_capacity>=COALESCE(demand.demand_seats,0)
+              AND v.max_capacity<=COALESCE((t.dispatch_policy->>'maximumVehicleCapacity')::int,8)
               AND NOT EXISTS(SELECT 1 FROM trip x WHERE x.driver_id=d.driver_id AND x.trip_status IN ('DISPATCHED','IN_PROGRESS'))
           )) ORDER BY t.dispatch_deadline,t.dispatch_started_at
           FOR UPDATE OF t SKIP LOCKED LIMIT 1
@@ -43,14 +47,16 @@ async function dispatchOne() {
               COALESCE((SELECT ST_Centroid(ST_Collect(sp.location_coords)) FROM booking b JOIN service_point sp ON sp.point_id=b.service_point_id WHERE b.trip_id=$6 AND b.booking_status='REQUESTED'),ms.station_coords)
               ELSE ms.station_coords END AS geom) pickup
           WHERE d.is_online=TRUE AND UPPER(COALESCE(d.shift_status,'')) IN ('AVAILABLE','ONLINE')
+            AND (CASE UPPER(TRIM(d.current_service_mode)) WHEN 'R2M' THEN 'RESIDENTIAL_TO_METRO' WHEN 'M2R' THEN 'METRO_TO_RESIDENTIAL' ELSE UPPER(TRIM(d.current_service_mode)) END)=$7
             AND d.current_location IS NOT NULL
+            AND d.location_accuracy_m IS NOT NULL AND d.location_accuracy_m<=${Number(config.drtStopArrivalRadiusM)}
             AND d.location_recorded_at>clock_timestamp()-($2::int*interval '1 second')
             AND v.is_active=TRUE AND COALESCE(v.is_frozen_until,FALSE)=FALSE
             AND v.max_capacity>=$3 AND v.max_capacity<=$4
             AND NOT EXISTS(SELECT 1 FROM trip x WHERE (x.driver_id=d.driver_id OR x.vehicle_id=v.vehicle_id) AND x.trip_status IN ('DISPATCHED','IN_PROGRESS'))
           ORDER BY v.max_capacity ASC,assignments_today ASC,pickup_distance ASC,d.driver_id
           FOR UPDATE OF d,v SKIP LOCKED LIMIT 1
-        `,[trip.station_id,Number(policy.driverLocationMaxAgeSeconds||90),Number(trip.demand_seats),Number(policy.maximumVehicleCapacity||8),trip.trip_direction,trip.trip_id]);
+        `,[trip.station_id,Number(policy.driverLocationMaxAgeSeconds||90),Number(trip.demand_seats),Number(policy.maximumVehicleCapacity||8),trip.trip_direction,trip.trip_id,trip.trip_direction]);
         const assignment = drivers.rows[0];
         if (!assignment) {
             await failOrRetry(client,trip,policy,"No online driver with a fresh location and suitable vehicle was available.");
@@ -93,11 +99,27 @@ async function failOrRetry(client,trip,policy,reason) {
 }
 
 async function createStopSequence(client,trip,driverId) {
-    const points=await client.query(`SELECT DISTINCT sp.point_id,sp.point_name,
-        ST_Distance(sp.location_coords::geography,(CASE WHEN t.trip_direction='METRO_TO_RESIDENTIAL' THEN ms.station_coords ELSE d.current_location END)::geography) AS sort_distance
-        FROM booking b JOIN service_point sp ON sp.point_id=b.service_point_id JOIN driver d ON d.driver_id=$2
-        JOIN trip t ON t.trip_id=b.trip_id JOIN metro_station ms ON ms.station_id=t.station_id
-        WHERE b.trip_id=$1 AND b.booking_status='ASSIGNED' ORDER BY sort_distance,sp.point_name`,[trip.trip_id,driverId]);
+    const points=trip.trip_direction==='RESIDENTIAL_TO_METRO'
+        ? await client.query(`SELECT sp.point_id,sp.point_name,ST_X(sp.location_coords) AS longitude,ST_Y(sp.location_coords) AS latitude
+            FROM service_point sp JOIN service_zone sz ON sz.zone_id=sp.zone_id JOIN metro_station ms ON ms.station_id=sz.station_id
+            WHERE sp.zone_id=$1 AND sz.station_id=$2 AND ms.is_active=TRUE AND sz.is_active=TRUE AND sp.is_active=TRUE
+              AND sp.verification_status='VERIFIED' AND sp.location_coords IS NOT NULL
+              AND ms.service_area_polygon IS NOT NULL AND ms.station_coords IS NOT NULL AND sz.boundary_polygon IS NOT NULL
+              AND sz.center_coords IS NOT NULL AND ST_Covers(ms.service_area_polygon,sz.center_coords)
+              AND ST_Covers(sz.boundary_polygon,sp.location_coords)
+            ORDER BY sp.point_name,sp.point_id`,[trip.zone_id,trip.station_id])
+        : await client.query(`SELECT DISTINCT sp.point_id,sp.point_name,ST_X(sp.location_coords) AS longitude,ST_Y(sp.location_coords) AS latitude
+            FROM booking b JOIN service_point sp ON sp.point_id=b.service_point_id JOIN service_zone sz ON sz.zone_id=sp.zone_id
+            JOIN metro_station ms ON ms.station_id=sz.station_id
+            WHERE b.trip_id=$1 AND b.zone_id=$2 AND sp.zone_id=$2 AND b.booking_status='ASSIGNED' AND sp.is_active=TRUE
+              AND sp.verification_status='VERIFIED' AND sp.location_coords IS NOT NULL AND sz.is_active=TRUE AND ms.is_active=TRUE
+              AND ms.service_area_polygon IS NOT NULL AND sz.boundary_polygon IS NOT NULL AND sz.center_coords IS NOT NULL
+              AND ST_Covers(ms.service_area_polygon,sz.center_coords) AND ST_Covers(sz.boundary_polygon,sp.location_coords)
+            ORDER BY sp.point_name,sp.point_id`,[trip.trip_id,trip.zone_id]);
+    if(trip.trip_direction==='RESIDENTIAL_TO_METRO') {
+        const start=await client.query("SELECT ST_X(current_location) AS longitude,ST_Y(current_location) AS latitude FROM driver WHERE driver_id=$1",[driverId]);
+        points.rows=orderNearestNeighbor(points.rows,start.rows[0]);
+    }
     let sequence=1;
     if(trip.trip_direction==='METRO_TO_RESIDENTIAL') {
         await client.query("INSERT INTO trip_stop_sequence(trip_id,station_id,stop_sequence,stop_status,stop_type) VALUES($1,$2,$3,'PENDING','STATION')",[trip.trip_id,trip.station_id,sequence++]);
@@ -108,4 +130,17 @@ async function createStopSequence(client,trip,driverId) {
     }
 }
 
-module.exports={dispatchOne};
+function geoDistance(a,b) {
+    const rad=x=>x*Math.PI/180, lat1=rad(Number(a.latitude)),lat2=rad(Number(b.latitude));
+    const dLat=lat2-lat1,dLon=rad(Number(b.longitude)-Number(a.longitude));
+    const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+    return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+}
+
+function orderNearestNeighbor(points,start){
+    const remaining=points.slice(),ordered=[];let current=start;
+    while(remaining.length){remaining.sort((a,b)=>geoDistance(current,a)-geoDistance(current,b)||a.point_id.localeCompare(b.point_id));const next=remaining.shift();ordered.push(next);current=next;}
+    return ordered;
+}
+
+module.exports={dispatchOne,orderNearestNeighbor};

@@ -29,6 +29,11 @@ module.exports = {
     port: process.env.PORT || 5000,
     frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
     drtWorkerIntervalMs: Number(process.env.DRT_WORKER_INTERVAL_MS || 1000),
+    drtStopArrivalRadiusM: (() => {
+        const radius=Number(process.env.DRT_STOP_ARRIVAL_RADIUS_M || 200);
+        if(!Number.isFinite(radius)||radius<25||radius>1000) throw new Error("DRT_STOP_ARRIVAL_RADIUS_M must be between 25 and 1000 metres.");
+        return radius;
+    })(),
 
     db: {
         host: process.env.DB_HOST,
