@@ -4,12 +4,16 @@
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
 
-function generateToken(admin) {
+function generateToken(identity) {
     const payload = {
-        adminId: admin.id,
-        email: admin.email,
-        role: admin.role
+        sub: identity.id,
+        identityId: identity.id,
+        email: identity.email,
+        role: identity.role
     };
+    if (identity.role === "ADMIN") payload.adminId = identity.id;
+    if (identity.role === "PASSENGER") payload.userId = identity.id;
+    if (identity.role === "DRIVER") payload.driverId = identity.id;
 
     return jwt.sign(payload, config.jwt.secret, {
         expiresIn: config.jwt.expiresIn

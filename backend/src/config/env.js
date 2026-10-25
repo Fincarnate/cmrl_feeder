@@ -5,17 +5,20 @@ require("dotenv").config();         //loads .env
 
 module.exports = {
     port: process.env.PORT || 5000,
+    frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    drtWorkerIntervalMs: Number(process.env.DRT_WORKER_INTERVAL_MS || 1000),
 
     db: {
         host: process.env.DB_HOST,
         port: process.env.DB_PORT,
         database: process.env.DB_NAME,
         user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD || "0000"
+        password: process.env.DB_PASSWORD
     },
 
     jwt: {
         secret: process.env.JWT_SECRET,
         expiresIn: process.env.JWT_EXPIRES_IN || "1d"
-    }
+    },
+    otpDeliveryMode: process.env.OTP_DELIVERY_MODE || (process.env.NODE_ENV === "production" ? "unconfigured" : "development")
 };

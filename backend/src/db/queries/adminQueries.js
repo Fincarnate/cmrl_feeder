@@ -10,7 +10,7 @@ async function findAdminByEmail(email) {            //finding/returning an admin
             password_hash,
             role
         FROM admins
-        WHERE email = $1
+        WHERE LOWER(email) = $1
         LIMIT 1
     `;
 

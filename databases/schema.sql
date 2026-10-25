@@ -49,6 +49,7 @@ CREATE TABLE users (
     phone_number VARCHAR(15) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -60,6 +61,8 @@ CREATE TABLE driver (
     active_zone_id UUID,
     phone_number VARCHAR(15) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
     driving_license_no VARCHAR(50) UNIQUE NOT NULL,
     current_service_mode VARCHAR(30),
     shift_status VARCHAR(30),
@@ -187,6 +190,8 @@ CREATE TABLE driver_telemetry (
         FOREIGN KEY (trip_id)
         REFERENCES trip(trip_id)
 );
+
+CREATE INDEX IF NOT EXISTS driver_telemetry_trip_recorded_idx ON driver_telemetry (trip_id, recorded_at DESC);
 
 
 CREATE TABLE driver_payout (

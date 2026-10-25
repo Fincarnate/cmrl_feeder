@@ -1,20 +1,45 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
+import PassengerPage from "./pages/PassengerPage";
+import DriverPage from "./pages/DriverPage";
+
+function destination(identity) {
+    return identity?.role === "ADMIN" ? "/admin" : identity?.role === "DRIVER" ? "/driver" : "/passenger";
+}
+
+function AuthRoutes() {
+    const [session, setSession] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("cmrlSession")) || null; } catch { return null; }
+    });
+    const navigate = useNavigate();
+    function login(next) {
+        localStorage.setItem("cmrlSession", JSON.stringify(next));
+        setSession(next);
+        navigate(destination(next.identity), { replace: true });
+    }
+    const logout = useCallback(() => {
+        localStorage.removeItem("cmrlSession");
+        setSession(null);
+        navigate("/login", { replace: true });
+    }, [navigate]);
+    const protectedPage = (role) => session?.identity?.role === role
+        ? role === "ADMIN" ? <DashboardPage session={session} onLogout={logout} /> : role === "DRIVER" ? <DriverPage session={session} onLogout={logout} /> : <PassengerPage session={session} onLogout={logout} />
+        : session ? <Navigate to={destination(session.identity)} replace /> : <Navigate to="/login" replace />;
+    return <Routes>
+        <Route path="/" element={<Navigate to={session ? destination(session.identity) : "/login"} replace />} />
+        <Route path="/login" element={session ? <Navigate to={destination(session.identity)} replace /> : <LoginPage onAuthenticated={login} />} />
+        <Route path="/admin" element={protectedPage("ADMIN")} />
+        <Route path="/passenger" element={protectedPage("PASSENGER")} />
+        <Route path="/driver" element={protectedPage("DRIVER")} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>;
+}
 
 function App() {
     return (
-        <BrowserRouter>
-            <Routes>
-                <Route
-                    path="/"
-                    element={<Navigate to="/login" replace />}
-                />
-                <Route
-                    path="/login"
-                    element={<LoginPage />}
-                />
-            </Routes>
-        </BrowserRouter>
+        <BrowserRouter><AuthRoutes /></BrowserRouter>
     );
 }
 
