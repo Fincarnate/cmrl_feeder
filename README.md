@@ -43,3 +43,6 @@ Seat capacity is reserved transactionally by counting bookings in REQUESTED, ASS
 Run `npm test` from `backend` for fare, operating policy, dispatch rules, booking states, and route/authentication checks. Run `npx eslint .` and `npx vite build` from `frontend`. Booking and dispatch integration still requires a reachable PostgreSQL/PostGIS database with the migrations applied and real service-area and driver/vehicle data.
 
 To run the read-only PostgreSQL/PostGIS integration test in PowerShell from `backend`, use `$env:DRT_INTEGRATION_TESTS='1'; node --test test/database.integration.test.js; Remove-Item Env:DRT_INTEGRATION_TESTS`. Database credentials are loaded from `backend/.env`.
+
+
+new test commit.
