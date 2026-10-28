@@ -130,7 +130,10 @@ async function resolvePassengerLocation(client, { direction, latitude, longitude
 
 async function findIdempotentBooking(client, userId, key) {
     if (!key) return null;
-    const { rows } = await client.query(`SELECT ${PASSENGER_BOOKING_COLUMNS} FROM booking b WHERE b.user_id=$1 AND b.idempotency_key=$2 LIMIT 1`, [userId, key]);
+    const { rows } = await client.query(`SELECT ${PASSENGER_BOOKING_COLUMNS},t.trip_status,t.driver_id,t.vehicle_id,t.dispatch_deadline,
+      d.full_name AS driver_name,v.registration_no FROM booking b LEFT JOIN trip t ON t.trip_id=b.trip_id
+      LEFT JOIN driver d ON d.driver_id=t.driver_id LEFT JOIN vehicle v ON v.vehicle_id=t.vehicle_id
+      WHERE b.user_id=$1 AND b.idempotency_key=$2 LIMIT 1`, [userId, key]);
     return rows[0] || null;
 }
 

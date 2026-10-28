@@ -18,10 +18,17 @@ test("PostgreSQL/PostGIS DRT schema and authenticated API integration", { skip: 
       PostGIS_Full_Version() AS postgis,
       to_regclass('public.drt_fare_policy') AS fare_policy,
       to_regclass('public.drt_operating_policy') AS operating_policy,
-      to_regclass('public.drt_engine_event') AS engine_events`);
+      to_regclass('public.drt_engine_event') AS engine_events,
+      to_regclass('public.recurring_booking_schedule') AS recurring_schedules,
+      to_regclass('public.recurring_booking_occurrence') AS recurring_occurrences,
+      to_regclass('public.driver') AS drivers, to_regclass('public.users') AS users`);
     assert.equal(rows[0].database, process.env.DB_NAME);
     assert.match(rows[0].postgis, /POSTGIS=/i);
     assert.ok(rows[0].fare_policy && rows[0].operating_policy && rows[0].engine_events);
+    assert.ok(rows[0].recurring_schedules && rows[0].recurring_occurrences);
+    const demoColumns=await pool.query(`SELECT table_name,COUNT(*)::int AS count FROM information_schema.columns
+      WHERE table_schema='public' AND ((table_name='driver' AND column_name='is_demo') OR (table_name='users' AND column_name='is_demo')) GROUP BY table_name`);
+    assert.equal(demoColumns.rows.length,2);
     const journeyColumns = await pool.query(`SELECT COUNT(*)::int AS count FROM information_schema.columns
       WHERE table_schema='public' AND table_name='booking' AND column_name IN ('booking_intent','origin_location','origin_location_source','gps_verified_at','pickup_acknowledged')`);
     assert.equal(journeyColumns.rows[0].count, 5);
@@ -44,6 +51,9 @@ test("PostgreSQL/PostGIS DRT schema and authenticated API integration", { skip: 
     const auth = { authorization: `Bearer ${token}` };
     const policyResponse = await app.inject({ method: "GET", url: "/api/dashboard/policies", headers: auth });
     assert.equal(policyResponse.statusCode, 200);
+    const demoStatus = await app.inject({ method: "GET", url: "/api/dashboard/demo-fleet", headers: auth });
+    assert.equal(demoStatus.statusCode,200);
+    assert.equal(demoStatus.json().enabled, false);
     const areaResponse = await app.inject({ method: "GET", url: "/api/bookings/service-areas", headers: { authorization: `Bearer ${generateToken({ id: "44444444-4444-4444-8444-444444444444", email: "passenger@example.invalid", role: "PASSENGER" })}` } });
     assert.equal(areaResponse.statusCode, 200);
     const passengerAuth = { authorization: `Bearer ${generateToken({ id: "44444444-4444-4444-8444-444444444444", email: "passenger@example.invalid", role: "PASSENGER" })}` };

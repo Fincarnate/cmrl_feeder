@@ -52,7 +52,7 @@ async function getDashboardMapData() {
           'bookable',is_active AND verification_status='VERIFIED' AND location_coords IS NOT NULL AND
             EXISTS(SELECT 1 FROM service_zone sz WHERE sz.zone_id=service_point.zone_id AND ST_Covers(sz.boundary_polygon,service_point.location_coords)))) FROM service_point), '[]'::json) AS service_points,
         COALESCE((SELECT json_agg(json_build_object('id', d.driver_id, 'name', d.full_name, 'recordedAt', d.location_recorded_at,
-          'coordinates', ST_AsGeoJSON(d.current_location)::json)) FROM driver d
+          'coordinates', ST_AsGeoJSON(d.current_location)::json,'isDemo',d.is_demo)) FROM driver d
           WHERE d.is_online=TRUE AND d.current_location IS NOT NULL AND d.location_recorded_at > clock_timestamp() -
             (COALESCE((SELECT driver_location_max_age_seconds FROM drt_operating_policy WHERE is_active=TRUE ORDER BY version DESC LIMIT 1),90)*INTERVAL '1 second')), '[]'::json) AS driver_locations
     `;

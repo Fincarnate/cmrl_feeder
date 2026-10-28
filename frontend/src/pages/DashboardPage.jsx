@@ -9,6 +9,7 @@ function DashboardPage({ session, onLogout }) {
     const [error, setError] = useState("");
     const [updatedAt, setUpdatedAt] = useState(null);
     const [operations,setOperations]=useState(null);
+    const [demoFleet,setDemoFleet]=useState(null);
     const [fareForm,setFareForm]=useState(null);
     const [operatingForm,setOperatingForm]=useState(null);
     const [policyMessage,setPolicyMessage]=useState("");
@@ -19,14 +20,16 @@ function DashboardPage({ session, onLogout }) {
             if (busy.current) return;
             busy.current = true;
             try {
-                const [nextSummary, nextMap,nextOperations] = await Promise.all([
+                const [nextSummary, nextMap,nextOperations,nextDemoFleet] = await Promise.all([
                     apiRequest("/dashboard/summary", { token: session.token }),
                     apiRequest("/dashboard/map-data", { token: session.token }),
-                    apiRequest("/dashboard/operations", { token: session.token })
+                    apiRequest("/dashboard/operations", { token: session.token }),
+                    apiRequest("/dashboard/demo-fleet", { token: session.token })
                 ]);
                 setSummary(nextSummary);
                 setMapData(nextMap);
                 setOperations(nextOperations);
+                setDemoFleet(nextDemoFleet);
                 setUpdatedAt(new Date());
                 setError("");
             } catch (requestError) {
@@ -74,6 +77,11 @@ function DashboardPage({ session, onLogout }) {
                         <article><span>Active bookings</span><strong>{summary.activeBookings}</strong><small>Active, confirmed, or in progress</small></article>
                     </div>
                     <div className="map-heading"><div><h2>Service network</h2><p>{updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : "Waiting for first update"} · refreshes every 2 seconds</p></div></div>
+                    {demoFleet && <section className="drt-panel"><h2>Demo fleet</h2>{!demoFleet.enabled?<p>Simulator disabled. Enable it in backend/.env for a local demonstration.</p>:<>
+                        <p>DEMO simulator enabled · {demoFleet.movementEnabled?"moving":"stationary"} locations · Ghost passengers {demoFleet.ghostPassengersEnabled?"enabled":"disabled"}</p>
+                        <div className="dashboard-stats">{["M2R","R2M"].map(direction=><article key={direction}><span>DEMO {direction}</span><strong>{demoFleet.drivers?.[direction]?.available||0} available</strong><small>Target {demoFleet.target?.[direction]} · {demoFleet.drivers?.[direction]?.busy||0} busy · {demoFleet.drivers?.[direction]?.vehicles||0} vehicles</small></article>)}<article><span>DEMO synthetic bookings</span><strong>{demoFleet.activeGhostBookings}</strong><small>{demoFleet.poolSize} demo drivers · latest fix {demoFleet.lastUpdateAt?new Date(demoFleet.lastUpdateAt).toLocaleTimeString():"not updated"}</small></article></div>
+                        {(demoFleet.shortfalls?.M2R||demoFleet.shortfalls?.R2M)&&<p className="dashboard-alert">DEMO pool shortfall · M2R: {demoFleet.shortfalls.M2R||0}, R2M: {demoFleet.shortfalls.R2M||0}</p>}{demoFleet.lastError&&<p className="dashboard-alert">DEMO simulator error: {demoFleet.lastError}</p>}
+                    </>}</section>}
                     {mapData && <ServiceMap data={mapData} />}
                     {mapData && !mapData.stations.length && !mapData.zones.length && !mapData.servicePoints.length && !mapData.driverLocations.length && <p className="empty-map">No station, service point, or recent driver location records have coordinates yet. Add real records to the database to populate the map.</p>}
                     {mapData?.passengerLocationAvailability && <p className="data-note">{mapData.passengerLocationAvailability}</p>}

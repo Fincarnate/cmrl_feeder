@@ -110,7 +110,7 @@ async function arriveAtStop(driverId, tripId, stopId) {
         const maxAge=Number(fallbackPolicy?.driver_location_max_age_seconds||90);
         if(!loc?.current_location || Number(loc.location_accuracy_m)>config.drtStopArrivalRadiusM || !loc.nearby || !loc.location_recorded_at || Date.now()-new Date(loc.location_recorded_at).getTime()>maxAge*1000) {await client.query("ROLLBACK");return {error:"LOCATION_REQUIRED"};}
         const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now;
-        const snapshot = require("../services/operatingPolicy").snapshotFor(now,fallbackPolicy);
+        const snapshot = require("../../modules/drt/services/operatingPolicy").snapshotFor(now,fallbackPolicy);
         const isPickup = (trip.rows[0].trip_direction === "METRO_TO_RESIDENTIAL" && stop.rows[0].stop_type === "STATION") ||
             (trip.rows[0].trip_direction === "RESIDENTIAL_TO_METRO" && stop.rows[0].stop_type === "SERVICE_POINT");
         const relevant = stop.rows[0].stop_type === "STATION"

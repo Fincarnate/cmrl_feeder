@@ -34,6 +34,19 @@ module.exports = {
         if(!Number.isFinite(radius)||radius<25||radius>1000) throw new Error("DRT_STOP_ARRIVAL_RADIUS_M must be between 25 and 1000 metres.");
         return radius;
     })(),
+    demo: {
+        enabled: process.env.DEMO_SIMULATION_ENABLED === "true",
+        nodeEnv: process.env.NODE_ENV || "development",
+        m2rAvailableTarget: Number(process.env.DEMO_M2R_AVAILABLE_TARGET || 3),
+        r2mAvailableTarget: Number(process.env.DEMO_R2M_AVAILABLE_TARGET || 3),
+        driverPoolSizePerDirection: Number(process.env.DEMO_DRIVER_POOL_SIZE_PER_DIRECTION || 6),
+        movementEnabled: process.env.DEMO_DRIVER_MOVEMENT_ENABLED !== "false",
+        locationUpdateIntervalMs: Number(process.env.DEMO_DRIVER_LOCATION_UPDATE_INTERVAL_MS || 5000),
+        ghostPassengersEnabled: process.env.DEMO_GHOST_PASSENGERS_ENABLED === "true",
+        ghostPassengerIntervalSeconds: Number(process.env.DEMO_GHOST_PASSENGER_INTERVAL_SECONDS || 60),
+        maxActiveGhostBookings: Number(process.env.DEMO_MAX_ACTIVE_GHOST_BOOKINGS || 6),
+        accountPassword: process.env.DEMO_ACCOUNT_PASSWORD || ""
+    },
 
     db: {
         host: process.env.DB_HOST,

@@ -5,18 +5,18 @@ export function JourneyChoices({ direction, setDirection, mode, setMode }) {
             <button type="button" className={direction === "METRO_TO_RESIDENTIAL" ? "journey-choice selected" : "journey-choice"} onClick={() => setDirection("METRO_TO_RESIDENTIAL")}>Metro to Residential</button>
         </div>
         {direction && <div className="journey-choice-grid mode-choices" role="group" aria-label="Booking type">
-            <button type="button" className={mode === "BOOKING" ? "journey-choice selected" : "journey-choice"} onClick={() => setMode("BOOKING")}>Booking <small>Shared DRT queue</small></button>
-            <button type="button" className={mode === "DIRECT" ? "journey-choice selected" : "journey-choice"} onClick={() => setMode("DIRECT")}>Direct Booking <small>Immediate assignment if available</small></button>
+            <button type="button" className={mode === "BOOKING" ? "journey-choice selected" : "journey-choice"} onClick={() => setMode("BOOKING")}>Booking <small>Recurring daily schedule</small></button>
+            <button type="button" className={mode === "DIRECT" ? "journey-choice selected" : "journey-choice"} onClick={() => setMode("DIRECT")}>Direct Booking <small>One immediate trip</small></button>
         </div>}
     </>;
 }
 
-export function LocationStatus({ location, onRetry, onManual }) {
+export function LocationStatus({ location, onRetry, onManual, showManual = false }) {
     if (!location.direction) return <p className="data-note">Choose a travel direction to begin. We’ll request your location only after you choose.</p>;
     const canFallback = ["denied", "timeout", "unavailable", "error"].includes(location.status);
     return <div className={location.status === "error" ? "location-status error" : "location-status"} role="status">
         <p>{location.message}</p>
-        {canFallback && <div className="form-actions"><button type="button" className="secondary-button" onClick={onRetry}>Retry location</button><button type="button" onClick={onManual}>Continue with manual selection</button></div>}
+        {(canFallback || showManual) && <div className="form-actions">{canFallback && <button type="button" className="secondary-button" onClick={onRetry}>Retry location</button>}<button type="button" onClick={onManual}>Choose location manually</button></div>}
     </div>;
 }
 
@@ -37,6 +37,6 @@ export function FareBreakdown({ quote }) {
     return <section className="fare-card" aria-label="Fare breakdown"><h3>Fare estimate · ₹{quote.fare} {quote.currency}</h3>
         <p>Base ₹{breakdown.baseFare} + distance ₹{breakdown.distanceFare} + booking fee ₹{breakdown.bookingFee}. {quote.distanceKm} km straight-line estimate; road routing is not configured.</p>
         <small>Fare policy v{quote.policyVersion} · expires {new Date(quote.expiresAt).toLocaleTimeString()}</small>
-        <p>No payment is collected here. Confirming creates the booking only.</p>
+        <p>No payment is collected here. Confirming saves the daily schedule or creates a one-time booking.</p>
     </section>;
 }

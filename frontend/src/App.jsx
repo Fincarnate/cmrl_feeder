@@ -11,16 +11,16 @@ function destination(identity) {
 
 function AuthRoutes() {
     const [session, setSession] = useState(() => {
-        try { return JSON.parse(localStorage.getItem("cmrlSession")) || null; } catch { return null; }
+        try { return JSON.parse(sessionStorage.getItem("cmrlSession")) || null; } catch { return null; }
     });
     const navigate = useNavigate();
     function login(next) {
-        localStorage.setItem("cmrlSession", JSON.stringify(next));
+        sessionStorage.setItem("cmrlSession", JSON.stringify(next));
         setSession(next);
         navigate(destination(next.identity), { replace: true });
     }
     const logout = useCallback(() => {
-        localStorage.removeItem("cmrlSession");
+        sessionStorage.removeItem("cmrlSession");
         setSession(null);
         navigate("/login", { replace: true });
     }, [navigate]);

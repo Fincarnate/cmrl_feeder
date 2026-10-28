@@ -1,1 +1,3 @@
 .env
+backend/exports/*.csv
+backend/exports/.*.tmp

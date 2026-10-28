@@ -4,8 +4,8 @@ const { dispatchDecision } = require("./dispatchRules");
 const { assertTransition } = require("./bookingStates");
 const config = require("../../../config/env");
 
-async function dispatchOne() {
-    const client = await pool.connect();
+async function dispatchOne(database=pool,tripId=null) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const candidate = await client.query(`
@@ -14,7 +14,8 @@ async function dispatchOne() {
           SELECT t.*,COALESCE(demand.demand_seats,0)::int AS demand_seats,COALESCE(demand.passenger_count,0)::int AS passenger_count,
             clock_timestamp() AS db_now
           FROM trip t LEFT JOIN demand ON demand.trip_id=t.trip_id
-          WHERE t.trip_status='WAITING_FOR_PASSENGERS' AND (t.dispatch_deadline<=clock_timestamp() OR EXISTS(
+          WHERE t.trip_status='WAITING_FOR_PASSENGERS' AND ($1::uuid IS NULL OR t.trip_id=$1)
+            AND (t.dispatch_deadline<=clock_timestamp() OR EXISTS(
             SELECT 1 FROM driver d JOIN vehicle v ON v.driver_id=d.driver_id
             WHERE d.is_online=TRUE AND UPPER(COALESCE(d.shift_status,'')) IN ('AVAILABLE','ONLINE')
               AND (CASE UPPER(TRIM(d.current_service_mode)) WHEN 'R2M' THEN 'RESIDENTIAL_TO_METRO' WHEN 'M2R' THEN 'METRO_TO_RESIDENTIAL' ELSE UPPER(TRIM(d.current_service_mode)) END)=t.trip_direction
@@ -26,7 +27,7 @@ async function dispatchOne() {
               AND NOT EXISTS(SELECT 1 FROM trip x WHERE x.driver_id=d.driver_id AND x.trip_status IN ('DISPATCHED','IN_PROGRESS'))
           )) ORDER BY t.dispatch_deadline,t.dispatch_started_at
           FOR UPDATE OF t SKIP LOCKED LIMIT 1
-        `);
+        `,[tripId]);
         const trip = candidate.rows[0];
         if (!trip) { await client.query("COMMIT"); return { processed:false }; }
         if (Number(trip.demand_seats) < 1) {
@@ -71,7 +72,7 @@ async function dispatchOne() {
         const atCapacity = decision === "DISPATCH_FULL";
         if (!atCapacity && decision !== "DISPATCH_PARTIAL") { await client.query("COMMIT"); return { processed:false }; }
         assertTransition("REQUESTED", "ASSIGNED");
-        await client.query(`UPDATE trip SET driver_id=$2,vehicle_id=$3,seat_capacity=$4,available_seats=$4-$5,
+        await client.query(`UPDATE trip SET driver_id=$2,vehicle_id=$3,seat_capacity=$4::int,available_seats=$4::int-$5::int,
             trip_status='DISPATCHED',dispatched_at=clock_timestamp(),updated_at=clock_timestamp() WHERE trip_id=$1`,
             [trip.trip_id,assignment.driver_id,assignment.vehicle_id,assignment.max_capacity,trip.demand_seats]);
         await client.query("UPDATE driver SET shift_status='BUSY' WHERE driver_id=$1",[assignment.driver_id]);

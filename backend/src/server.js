@@ -4,6 +4,7 @@ const buildApp = require("./app");
 const config = require("./config/env");
 const pool = require("./db/pool");
 const { createWorker } = require("./modules/drt/services/workerService");
+const { getDemoFleetService } = require("./modules/drt/services/demoFleetService");
 
 async function startServer() {
     const app = buildApp();
@@ -16,11 +17,14 @@ async function startServer() {
 
         const worker = createWorker({ logger: app.log, intervalMs: config.drtWorkerIntervalMs });
         worker.start();
+        const demoFleet = getDemoFleetService({ logger: app.log });
+        await demoFleet.start();
         let shuttingDown = false;
         const shutdown = async (signal) => {
             if (shuttingDown) return;
             shuttingDown = true;
             app.log.info({ signal }, "Shutting down CMRL Feeder services.");
+            await demoFleet.stop();
             await worker.stop();
             await app.close();
             await pool.end();

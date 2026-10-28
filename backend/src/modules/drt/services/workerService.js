@@ -1,5 +1,6 @@
 const pool = require("../../../db/pool");
 const { dispatchOne } = require("./dispatchService");
+const { materializeOneDueSchedule } = require("./scheduleService");
 const { assertTransition } = require("./bookingStates");
 
 async function resolveOneNoShow() {
@@ -47,6 +48,8 @@ function createWorker({logger,intervalMs=1000}) {
         if(stopped||active)return;
         active=true;
         try {
+            const schedule=await materializeOneDueSchedule();
+            if(schedule.processed)logger?.info({event:"drt_schedule_worker",...schedule},"DRT worker processed a recurring schedule");
             await resolveOneNoShow();
             await clearExpiredOtp();
             const dispatch=await dispatchOne();

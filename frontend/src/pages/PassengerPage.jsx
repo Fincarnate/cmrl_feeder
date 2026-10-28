@@ -14,13 +14,19 @@ function buildMapData(rows) {
     const servicePoints = rows.filter(row => row.point_id && row.point_geometry).map(row => ({ id: row.point_id, name: row.point_name, zoneId: row.zone_id, coordinates: row.point_geometry, bookable: row.is_bookable, coordinateSource: row.point_coordinate_source }));
     return { stations, zones, servicePoints, driverLocations: [], passengerLocations: [] };
 }
+function dateInTimezone(timeZone) {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const part = type => parts.find(item => item.type === type)?.value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
+}
 
 export default function PassengerPage({ session, onLogout }) {
     const token = session.token;
     const [areas, setAreas] = useState([]), [areasLoaded, setAreasLoaded] = useState(false);
-    const [bookings, setBookings] = useState([]), [direction, setDirection] = useState("");
+    const [bookings, setBookings] = useState([]), [schedules, setSchedules] = useState([]), [direction, setDirection] = useState("");
     const [mode, setMode] = useState("BOOKING"), [manualMode, setManualMode] = useState(false);
     const [stationId, setStationId] = useState(""), [zoneId, setZoneId] = useState(""), [pointId, setPointId] = useState(""), [seats, setSeats] = useState(1);
+    const [dailyDepartureTime, setDailyDepartureTime] = useState("08:00");
     const [acknowledged, setAcknowledged] = useState(false), [quote, setQuote] = useState(null);
     const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState(""), [directUnavailable, setDirectUnavailable] = useState(false);
     const { location, request: requestLocation, reset: resetLocation } = usePassengerLocation(token);
@@ -29,21 +35,25 @@ export default function PassengerPage({ session, onLogout }) {
         const data = await apiRequest("/bookings", { token });
         setBookings(data.bookings || []);
     }, [token]);
+    const refreshSchedules = useCallback(async () => {
+        const data = await apiRequest("/bookings/schedules", { token });
+        setSchedules(data.schedules || []);
+    }, [token]);
     useEffect(() => {
         let alive = true;
         (async () => {
             try {
-                const [rows] = await Promise.all([apiRequest("/bookings/service-areas", { token }), refreshBookings()]);
+                const [rows] = await Promise.all([apiRequest("/bookings/service-areas", { token }), refreshBookings(), refreshSchedules()]);
                 if (alive) { setAreas(rows); setAreasLoaded(true); }
             } catch (e) { if (e.status === 401 || e.status === 403) onLogout(); else if (alive) setError(e.message); }
         })();
         return () => { alive = false; };
-    }, [token, refreshBookings, onLogout]);
+    }, [token, refreshBookings, refreshSchedules, onLogout]);
     useEffect(() => {
         let active = true;
-        const timer = setInterval(() => refreshBookings().catch(e => { if (active && (e.status === 401 || e.status === 403)) onLogout(); }), 7000);
+        const timer = setInterval(() => Promise.all([refreshBookings(),refreshSchedules()]).catch(e => { if (active && (e.status === 401 || e.status === 403)) onLogout(); }), 7000);
         return () => { active = false; clearInterval(timer); };
-    }, [refreshBookings, onLogout]);
+    }, [refreshBookings, refreshSchedules, onLogout]);
 
     const allStations = useMemo(() => uniqueBy(areas, "station_id", "station_name"), [areas]);
     const zones = useMemo(() => uniqueBy(areas.filter(row => !stationId || row.station_id === stationId), "zone_id", "zone_name"), [areas, stationId]);
@@ -66,16 +76,20 @@ export default function PassengerPage({ session, onLogout }) {
     }
     function continueManually() {
         setManualMode(true); setQuote(null); setAcknowledged(false);
-        if (!stationId && allStations[0]) setStationId(allStations[0].station_id);
+        const currentStation=allStations.find(station=>station.station_id===stationId);
+        const station=currentStation||allStations[0];
+        if(station){
+            const usable=areas.find(row=>row.station_id===station.station_id&&row.is_bookable&&row.point_id);
+            setStationId(station.station_id);
+            if(usable){setZoneId(usable.zone_id);setPointId(usable.point_id);}
+        }
     }
     function changeStation(value) {
         if (direction === "METRO_TO_RESIDENTIAL" && locationResult?.result === "AT_SUPPORTED_STATION" && !manualMode
             && !locationResult.stations.some(station => station.station_id === value)) return;
         setStationId(value);
-        if (direction === "RESIDENTIAL_TO_METRO") {
-            const zone = areas.find(row => row.station_id === value);
-            setZoneId(zone?.zone_id || ""); setPointId(zone?.point_id || "");
-        }
+        const row=areas.find(candidate=>candidate.station_id===value&&candidate.is_bookable&&candidate.point_id);
+        setZoneId(row?.zone_id||""); setPointId(row?.point_id||"");
         setQuote(null); setAcknowledged(false);
     }
     function changeZone(value) {
@@ -85,17 +99,23 @@ export default function PassengerPage({ session, onLogout }) {
             setStationId(gpsZone.station_id); setZoneId(value); setPointId(gpsZone.point_id);
             setQuote(null); setAcknowledged(false); return;
         }
-        const eligiblePoints = areas.filter(row => row.zone_id === value);
-        const point = direction === "METRO_TO_RESIDENTIAL" && eligiblePoints.length !== 1 ? null : eligiblePoints[0];
+        const eligiblePoints = areas.filter(row => row.zone_id === value && row.is_bookable && row.point_id);
+        const point = eligiblePoints.find(row=>row.point_id===pointId)||eligiblePoints[0];
         setZoneId(value); setPointId(point?.point_id || "");
-        if (direction === "RESIDENTIAL_TO_METRO" && point) setStationId(point.station_id);
+        if (point) setStationId(point.station_id);
         setQuote(null); setAcknowledged(false);
     }
     function changePoint(value) { setPointId(value); setQuote(null); if (locationResult?.result === "NEARBY_RECOMMENDATION") setAcknowledged(false); }
     function payload() {
         return { direction, stationId, zoneId, servicePointId: pointId, seatsRequested: Number(seats), bookingIntent: mode,
+            ...(mode === "BOOKING" ? { dailyDepartureTime } : {}),
             originLocationSource: manualMode ? "MANUAL" : "GPS", latitude: manualMode ? null : gpsCoordinates?.latitude,
             longitude: manualMode ? null : gpsCoordinates?.longitude, pickupAcknowledged: acknowledged };
+    }
+    function changeMode(next) {
+        setMode(next); setQuote(null); setDirectUnavailable(false); setManualMode(false); setAcknowledged(false);
+        if(location.status==="resolved"&&locationResult)applyLocationResolution(locationResult,direction);
+        else {setStationId("");setZoneId("");setPointId("");}
     }
     const outsideStation = direction === "METRO_TO_RESIDENTIAL" && !manualMode && locationResult?.result === "OUTSIDE_STATION";
     const locationReady = location.direction === direction && location.status === "resolved" && locationResult && !["OUTSIDE_STATION", "UNAVAILABLE"].includes(locationResult.result);
@@ -118,9 +138,16 @@ export default function PassengerPage({ session, onLogout }) {
         if (!quote?.quoteToken) return;
         setBusy(true); setError(""); setNotice("");
         try {
-            await apiRequest("/bookings", { token, method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ ...payload(), quoteToken: quote.quoteToken }) });
-            setNotice(mode === "DIRECT" ? "Direct booking assigned immediately by the dispatch service." : "Booking request added to the shared dispatch queue. No payment was collected.");
-            setQuote(null); await refreshBookings();
+            if(mode==="BOOKING"){
+                const result=await apiRequest("/bookings/schedules",{token,method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({...payload(),quoteToken:quote.quoteToken})});
+                setNotice(`Daily booking schedule created. Next departure: ${new Date(result.schedule.next_departure_at).toLocaleString()} (${result.schedule.timezone}). Today's trip will appear when that departure is due.`);
+                await refreshSchedules();
+            }else{
+                await apiRequest("/bookings", { token, method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ ...payload(), quoteToken: quote.quoteToken }) });
+                setNotice("Direct booking request submitted. Check the trip status and driver details below for the actual assignment result.");
+                await refreshBookings();
+            }
+            setQuote(null);
         } catch (e) {
             setError(e.message);
             if (mode === "DIRECT" && e.status === 409) { setDirectUnavailable(true); setNotice("Direct Booking is unavailable right now. You can switch to Booking to join the shared queue, or cancel."); }
@@ -129,6 +156,10 @@ export default function PassengerPage({ session, onLogout }) {
     async function cancel(id) {
         try { await apiRequest(`/bookings/${id}/cancel`, { token, method: "POST" }); setNotice("Booking cancelled."); await refreshBookings(); }
         catch (e) { setError(e.message); }
+    }
+    async function cancelRecurringSchedule(id) {
+        try { await apiRequest(`/bookings/schedules/${id}/cancel`,{token,method:"POST"});setNotice("Schedule cancelled. Past trips and occurrences remain in your history.");await refreshSchedules(); }
+        catch(e){setError(e.message);}
     }
     async function getOtp(id) {
         try { const data = await apiRequest(`/bookings/${id}/otp`, { token }); setNotice(`Boarding OTP: ${data.otp} · expires ${new Date(data.expiresAt).toLocaleTimeString()} (development retrieval)`); }
@@ -145,22 +176,41 @@ export default function PassengerPage({ session, onLogout }) {
     return <main className="dashboard-page"><div className="dashboard-layout">
         <header className="dashboard-header"><div><h1>CMRL Feeder</h1><p>Passenger · {session.identity.name}</p></div><button onClick={onLogout}>Log out</button></header>
         <section className="drt-panel"><h2>Plan your feeder journey</h2>
-            <JourneyChoices direction={direction} setDirection={chooseDirection} mode={mode} setMode={next => { setMode(next); setQuote(null); setDirectUnavailable(false); }} />
-            <LocationStatus location={location} onRetry={() => requestLocation(direction, applyLocationResolution)} onManual={continueManually} />
+            <JourneyChoices direction={direction} setDirection={chooseDirection} mode={mode} setMode={changeMode} />
+            <LocationStatus location={location} onRetry={() => requestLocation(direction, applyLocationResolution)} onManual={continueManually}
+                showManual={Boolean(direction && mode === "BOOKING" && location.status === "resolved" && !manualMode)} />
             {manualMode && <p className="data-note">Manual selection · your origin has not been GPS-verified. Select a configured station or residential pickup location.</p>}
             {direction && <JourneyFields direction={direction} stations={stationChoices} zones={zoneChoices} points={pointChoices}
                 stationId={stationId} zoneId={zoneId} pointId={pointId} onStation={changeStation} onZone={changeZone} onPoint={changePoint}
                 seats={seats} setSeats={n => { setSeats(n); setQuote(null); }} disabled={busy || !areasLoaded || (!manualMode && location.status !== "resolved")} />}
             {zoneId && !points.length && <p className="dashboard-alert" role="status">This residential zone is mapped, but it has no verified operational pickup point yet. An unverified map reference cannot be booked. Ask an administrator to configure and verify a safe pickup point.</p>}
             {acknowledgementRequired && <label className="acknowledge-pickup"><input type="checkbox" checked={acknowledged} onChange={e => { setAcknowledged(e.target.checked); setQuote(null); }} /> I understand pickup will be at {selectedPoint?.point_name || "the suggested service point"}, not at my GPS location.</label>}
-            {outsideStation && <p className="dashboard-alert" role="alert">This GPS location is outside all supported station boundaries. You can retry location detection; manual station selection is not available after a verified out-of-boundary result.</p>}
+            {outsideStation && <div className="dashboard-alert" role="alert"><p>This GPS location is outside all supported station boundaries. Choose a configured station and residential pickup manually to continue.</p>
+                {mode === "DIRECT" && !manualMode && <button type="button" className="secondary-button" onClick={continueManually}>Book anyway</button>}</div>}
+            {mode === "BOOKING" && direction && <label className="schedule-time-field">Daily departure time
+                <input type="time" value={dailyDepartureTime} onChange={event => { setDailyDepartureTime(event.target.value); setQuote(null); }} required />
+                <small>Repeats every day until cancelled. Each trip is created when its scheduled departure arrives.</small>
+            </label>}
             {!areasLoaded && <p className="loading-note">Loading configured service locations…</p>}
             {areasLoaded && !areas.length && <p className="dashboard-alert" role="alert">No configured station, service-zone, and service-point relationships are available. Feeder bookings cannot be created until legitimate geographic data is configured.</p>}
             {error && <p className="dashboard-alert" role="alert">{error}</p>}{notice && <p className="login-success" role="status">{notice}{directUnavailable && <button className="inline-action" onClick={() => { setMode("BOOKING"); setQuote(null); setDirectUnavailable(false); }}>Switch to Booking</button>}</p>}
-            <div className="form-actions"><button disabled={busy || !canQuote} onClick={preview}>{busy ? "Working…" : "Calculate fare"}</button>{quote && <button disabled={busy} onClick={book}>{mode === "DIRECT" ? "Confirm Direct Booking" : "Confirm Booking"} · ₹{quote.fare}</button>}</div>
+            <div className="form-actions"><button disabled={busy || !canQuote} onClick={preview}>{busy ? "Working…" : "Calculate fare"}</button>{quote && <button disabled={busy} onClick={book}>{mode === "DIRECT" ? "Confirm Direct Booking" : "Save Daily Booking"} · ₹{quote.fare}</button>}</div>
             <FareBreakdown quote={quote} />
         </section>
         {areas.length > 0 && direction && <ServiceMap data={mapData} markers={markers} selectedPoint={selectedMapPoint} selectedZoneId={zoneId} layers={{ driverLocations: false }} />}
-        <section className="drt-panel"><h2>Your bookings</h2>{bookings.length === 0 ? <p>No bookings yet.</p> : <div className="booking-list">{bookings.map(b => <article key={b.booking_id}><div><strong>{b.direction?.replaceAll("_", " ") || "Feeder journey"} · {b.booking_intent === "DIRECT" ? "Direct" : "Booking"}</strong><p>{b.booking_status} · {b.seats_reserved} seat(s) · ₹{b.fare_amount} {b.fare_currency}</p><p>{b.trip_status || "Waiting for trip"}{b.driver_name ? ` · ${b.driver_name} · ${b.registration_no || ""}` : ""}{b.dispatch_deadline ? ` · dispatch deadline ${new Date(b.dispatch_deadline).toLocaleTimeString()}` : ""}</p>{b.boarding_deadline && <p>Boarding deadline: {new Date(b.boarding_deadline).toLocaleTimeString()}</p>}</div><div className="booking-actions">{b.booking_status === "BOARDING" && <button onClick={() => getOtp(b.booking_id)}>Show boarding OTP</button>}{["REQUESTED", "ASSIGNED"].includes(b.booking_status) && <button className="secondary-button" onClick={() => cancel(b.booking_id)}>Cancel</button>}</div></article>)}</div>}</section>
+        <section className="drt-panel"><h2>Daily recurring schedules</h2>{schedules.length===0?<p>No recurring schedules yet.</p>:<div className="booking-list">{schedules.map(schedule=>{
+            const today=dateInTimezone(schedule.timezone);
+            const todaysOccurrence=(schedule.occurrences||[]).find(occurrence=>occurrence.serviceDate===today);
+            return <article key={schedule.schedule_id}><div><strong>{schedule.direction.replaceAll("_"," ")} · {schedule.schedule_status}</strong>
+                <p>{schedule.station_name} · {schedule.zone_name} · {schedule.point_name} · {schedule.seats_reserved} seat(s)</p>
+                <p>Daily departure: {schedule.daily_departure_time.slice(0,5)} ({schedule.timezone})</p>
+                {schedule.schedule_status==="ACTIVE"&&<p>Next scheduled departure: {new Date(schedule.next_departure_at).toLocaleString("en-IN",{timeZone:schedule.timezone})}</p>}
+                <p>Today's trip: {todaysOccurrence?`${todaysOccurrence.status}${todaysOccurrence.bookingStatus?` · booking ${todaysOccurrence.bookingStatus}`:""}${todaysOccurrence.tripId?` · trip ${todaysOccurrence.tripStatus||"WAITING_FOR_PASSENGERS"}`:""}`:
+                    schedule.schedule_status==="ACTIVE"&&schedule.next_service_date===today?"Not generated yet":"No trip generated today"}</p>
+                {todaysOccurrence?.driverName&&<p>Driver: {todaysOccurrence.driverName}{todaysOccurrence.vehicleRegistration?` · ${todaysOccurrence.vehicleRegistration}`:""}</p>}
+                {(schedule.occurrences||[]).length>0&&<details><summary>Recent occurrences</summary><ul>{schedule.occurrences.map(occurrence=><li key={occurrence.occurrenceId}>{occurrence.serviceDate} · {occurrence.status}{occurrence.tripStatus?` · ${occurrence.tripStatus}`:""}{occurrence.driverName?` · ${occurrence.driverName}`:""}</li>)}</ul></details>}
+            </div>{schedule.schedule_status==="ACTIVE"&&<button className="secondary-button" onClick={()=>cancelRecurringSchedule(schedule.schedule_id)}>Cancel schedule</button>}</article>;
+        })}</div>}</section>
+        <section className="drt-panel"><h2>One-time bookings</h2>{bookings.length === 0 ? <p>No one-time bookings yet.</p> : <div className="booking-list">{bookings.map(b => <article key={b.booking_id}><div><strong>{b.direction?.replaceAll("_", " ") || "Feeder journey"} · Direct</strong><p>{b.booking_status} · {b.seats_reserved} seat(s) · ₹{b.fare_amount} {b.fare_currency}</p><p>{b.trip_status || "Waiting for trip"}{b.driver_name ? ` · ${b.driver_name} · ${b.registration_no || ""}` : ""}{b.dispatch_deadline ? ` · dispatch deadline ${new Date(b.dispatch_deadline).toLocaleTimeString()}` : ""}</p>{b.boarding_deadline && <p>Boarding deadline: {new Date(b.boarding_deadline).toLocaleTimeString()}</p>}</div><div className="booking-actions">{b.booking_status === "BOARDING" && <button onClick={() => getOtp(b.booking_id)}>Show boarding OTP</button>}{["REQUESTED", "ASSIGNED"].includes(b.booking_status) && <button className="secondary-button" onClick={() => cancel(b.booking_id)}>Cancel</button>}</div></article>)}</div>}</section>
     </div></main>;
 }

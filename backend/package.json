@@ -7,7 +7,11 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test": "node --test",
-    "seed:thirumangalam": "node src/scripts/seed-thirumangalam.js"
+    "seed:thirumangalam": "node src/scripts/seed-thirumangalam.js",
+    "demo:seed": "node src/scripts/seed-demo-fleet.js",
+    "demo:inspect": "node src/scripts/inspect-demo-fleet.js",
+    "demo:reset": "node src/scripts/reset-demo-fleet.js",
+    "demo:export": "node src/scripts/export-demo-trips.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

@@ -27,6 +27,11 @@ async function getOperations(request,reply) {
     catch(error) { request.log.error(error); return reply.code(500).send({message:"Unable to load operational data."}); }
 }
 
+async function getDemoFleet(request,reply) {
+    try { return reply.send(await services.getDemoFleet()); }
+    catch(error) { request.log.error(error); return reply.code(500).send({message:"Unable to load demo fleet status."}); }
+}
+
 async function getPolicies(request,reply) {
     try { return reply.send(await services.getPolicies()); }
     catch(error) { request.log.error(error); return reply.code(500).send({message:"Unable to load policies."}); }
@@ -46,6 +51,7 @@ module.exports = {
     getSummary,
     getMapData,
     getOperations,
+    getDemoFleet,
     getPolicies,
     patchFarePolicy,
     patchOperatingPolicy

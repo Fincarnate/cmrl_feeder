@@ -1,4 +1,5 @@
 const service = require("./driverServices");
+const { exportDemoTripHistory } = require("../drt/services/demoCsvExportService");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const driverId = request => request.identity.driverId || request.identity.identityId;
 
@@ -67,6 +68,14 @@ async function completeStop(request, reply) {
     try {
         const result=await service.completeStop(driverId(request),tripId,stopId,request.body||{});
         if(result.error) return reply.code(409).send({message:({PICKUP_NOT_RESOLVED:"All passengers at this pickup must board or reach their no-show outcome first.",NO_PASSENGER_CONFIRMATION_REQUIRED:"Confirm that no scheduled passenger is waiting at this service point.",STOP_ORDER:"Complete earlier stops first."})[result.error]||"Stop is not ready to complete."});
+        if(result.completed) {
+            try {
+                const exported=await exportDemoTripHistory({tripId});
+                if(exported.exported) request.log.info({event:"demo_trip_csv_refreshed",tripId,rows:exported.rows},"Refreshed demo trip history CSV.");
+            } catch(error) {
+                request.log.error({err:error,tripId},"Unable to refresh demo trip history CSV.");
+            }
+        }
         return reply.send(result);
     } catch(error) { request.log.error(error); return reply.code(500).send({message:"Unable to complete stop."}); }
 }
