@@ -2,8 +2,8 @@ const pool = require("../pool");
 const { assertTransition } = require("../../modules/drt/services/bookingStates");
 const config = require("../../config/env");
 
-async function createTelemetry(driverId, input) {
-    const client = await pool.connect();
+async function createTelemetry(driverId, input, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         if (input.tripId) {
@@ -90,8 +90,8 @@ async function setActiveZone(driverId,zoneId){
         AND EXISTS(SELECT 1 FROM service_point sp WHERE sp.zone_id=sz.zone_id AND sp.is_active AND sp.verification_status='VERIFIED' AND sp.location_coords IS NOT NULL AND ST_Covers(sz.boundary_polygon,sp.location_coords))) RETURNING active_zone_id`,[driverId,zoneId]);return rows[0]||null;
 }
 
-async function arriveAtStop(driverId, tripId, stopId) {
-    const client = await pool.connect();
+async function arriveAtStop(driverId, tripId, stopId, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const trip = await client.query("SELECT * FROM trip WHERE trip_id=$1 AND driver_id=$2 AND trip_status IN ('DISPATCHED','IN_PROGRESS') FOR UPDATE", [tripId,driverId]);
@@ -135,8 +135,8 @@ async function arriveAtStop(driverId, tripId, stopId) {
     finally { client.release(); }
 }
 
-async function completeStop(driverId, tripId, stopId, body={}) {
-    const client = await pool.connect();
+async function completeStop(driverId, tripId, stopId, body={}, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const trip = await client.query("SELECT * FROM trip WHERE trip_id=$1 AND driver_id=$2 AND trip_status IN ('DISPATCHED','IN_PROGRESS','COMPLETED') FOR UPDATE", [tripId,driverId]);
@@ -173,8 +173,8 @@ async function completeStop(driverId, tripId, stopId, body={}) {
     finally { client.release(); }
 }
 
-async function startTrip(driverId, tripId) {
-    const client = await pool.connect();
+async function startTrip(driverId, tripId, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const trip = await client.query("SELECT * FROM trip WHERE trip_id=$1 AND driver_id=$2 FOR UPDATE", [tripId,driverId]);
@@ -188,8 +188,8 @@ async function startTrip(driverId, tripId) {
     } catch(error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
 }
 
-async function issueBoardingOtp(userId, bookingId, otpHash, validityMinutes) {
-    const client = await pool.connect();
+async function issueBoardingOtp(userId, bookingId, otpHash, validityMinutes, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const { rows } = await client.query("SELECT booking_id,booking_status,boarding_deadline,boarding_policy FROM booking WHERE booking_id=$1 AND user_id=$2 FOR UPDATE", [bookingId,userId]);
@@ -205,8 +205,8 @@ async function issueBoardingOtp(userId, bookingId, otpHash, validityMinutes) {
     } catch(error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
 }
 
-async function verifyBoardingOtp(driverId, bookingId, code, compareHash) {
-    const client = await pool.connect();
+async function verifyBoardingOtp(driverId, bookingId, code, compareHash, database=pool) {
+    const client = await database.connect();
     try {
         await client.query("BEGIN");
         const { rows } = await client.query(`SELECT b.*,t.driver_id AS assigned_driver,t.trip_status AS assigned_trip_status,

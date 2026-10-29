@@ -24,6 +24,8 @@ async function dispatchOne(database=pool,tripId=null) {
               AND v.is_active=TRUE AND COALESCE(v.is_frozen_until,FALSE)=FALSE
               AND v.max_capacity>=COALESCE(demand.demand_seats,0)
               AND v.max_capacity<=COALESCE((t.dispatch_policy->>'maximumVehicleCapacity')::int,8)
+              AND (NOT EXISTS(SELECT 1 FROM booking synthetic JOIN users passenger ON passenger.user_id=synthetic.user_id
+                WHERE synthetic.trip_id=t.trip_id AND passenger.is_demo=TRUE AND synthetic.idempotency_key LIKE 'demo-ghost:%') OR d.is_demo=TRUE)
               AND NOT EXISTS(SELECT 1 FROM trip x WHERE x.driver_id=d.driver_id AND x.trip_status IN ('DISPATCHED','IN_PROGRESS'))
           )) ORDER BY t.dispatch_deadline,t.dispatch_started_at
           FOR UPDATE OF t SKIP LOCKED LIMIT 1
@@ -54,6 +56,8 @@ async function dispatchOne(database=pool,tripId=null) {
             AND d.location_recorded_at>clock_timestamp()-($2::int*interval '1 second')
             AND v.is_active=TRUE AND COALESCE(v.is_frozen_until,FALSE)=FALSE
             AND v.max_capacity>=$3 AND v.max_capacity<=$4
+            AND (NOT EXISTS(SELECT 1 FROM booking synthetic JOIN users passenger ON passenger.user_id=synthetic.user_id
+              WHERE synthetic.trip_id=$6 AND passenger.is_demo=TRUE AND synthetic.idempotency_key LIKE 'demo-ghost:%') OR d.is_demo=TRUE)
             AND NOT EXISTS(SELECT 1 FROM trip x WHERE (x.driver_id=d.driver_id OR x.vehicle_id=v.vehicle_id) AND x.trip_status IN ('DISPATCHED','IN_PROGRESS'))
           ORDER BY v.max_capacity ASC,assignments_today ASC,pickup_distance ASC,d.driver_id
           FOR UPDATE OF d,v SKIP LOCKED LIMIT 1

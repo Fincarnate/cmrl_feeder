@@ -11,6 +11,11 @@ function validateSeedConfig() {
     if (!Number.isInteger(demo.driverPoolSizePerDirection) || demo.driverPoolSizePerDirection < 1 || demo.driverPoolSizePerDirection > 50) {
         throw new Error("DEMO_DRIVER_POOL_SIZE_PER_DIRECTION must be an integer from 1 to 50.");
     }
+    const passengerPoolSize=Number(demo.passengerPoolSize??demo.maxActiveGhostBookings);
+    if(!Number.isInteger(passengerPoolSize)||passengerPoolSize<1||passengerPoolSize>50)
+        throw new Error("DEMO_PASSENGER_POOL_SIZE must be an integer from 1 to 50.");
+    if(demo.maxActiveGhostBookings>passengerPoolSize)
+        throw new Error("DEMO_MAX_ACTIVE_GHOST_BOOKINGS cannot exceed DEMO_PASSENGER_POOL_SIZE.");
 }
 
 async function loadGeography(client) {
@@ -99,7 +104,7 @@ async function seedFleet() {
                 if(!vehicle.rows[0])throw new Error(`Demo vehicle ${registration} conflicts with a non-demo account.`);
             }
         }
-        for(let index=1;index<=Math.min(50,config.demo.maxActiveGhostBookings);index++){
+        for(let index=1;index<=config.demo.passengerPoolSize;index++){
             const ordinal=String(index).padStart(2,"0"),email=`cmrl.demo.passenger.${ordinal}@example.test`;
             const phone=`+9198${"23"}${String(index).padStart(7,"0")}`;
             const existing=await client.query("SELECT user_id,is_demo FROM users WHERE email=$1 FOR UPDATE",[email]);
@@ -113,7 +118,7 @@ async function seedFleet() {
             }
         }
         await client.query("COMMIT");
-        console.log(`Demo fleet seeded: ${created} drivers created, ${updated} drivers refreshed; ${size} accounts per direction and ${Math.min(50,config.demo.maxActiveGhostBookings)} demo passenger accounts.`);
+        console.log(`Demo fleet seeded: ${created} drivers created, ${updated} drivers refreshed; ${size} accounts per direction and ${config.demo.passengerPoolSize} demo passenger accounts.`);
         console.log("Login emails use cmrl.demo.m2r.NN@example.test and cmrl.demo.r2m.NN@example.test. Use the local DEMO_ACCOUNT_PASSWORD value; passwords are not printed.");
     } catch(error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); await pool.end(); }

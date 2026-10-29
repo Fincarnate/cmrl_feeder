@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import PassengerPage from "./pages/PassengerPage";
 import DriverPage from "./pages/DriverPage";
+import DataAnalyticsPage from "./pages/DataAnalyticsPage";
 
 function destination(identity) {
     return identity?.role === "ADMIN" ? "/admin" : identity?.role === "DRIVER" ? "/driver" : "/passenger";
@@ -31,6 +32,9 @@ function AuthRoutes() {
         <Route path="/" element={<Navigate to={session ? destination(session.identity) : "/login"} replace />} />
         <Route path="/login" element={session ? <Navigate to={destination(session.identity)} replace /> : <LoginPage onAuthenticated={login} />} />
         <Route path="/admin" element={protectedPage("ADMIN")} />
+        <Route path="/admin/analytics" element={session?.identity?.role === "ADMIN"
+            ? <DataAnalyticsPage session={session} onLogout={logout} />
+            : session ? <Navigate to={destination(session.identity)} replace /> : <Navigate to="/login" replace />} />
         <Route path="/passenger" element={protectedPage("PASSENGER")} />
         <Route path="/driver" element={protectedPage("DRIVER")} />
         <Route path="*" element={<Navigate to="/" replace />} />

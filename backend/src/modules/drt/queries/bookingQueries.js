@@ -137,14 +137,17 @@ async function findIdempotentBooking(client, userId, key) {
     return rows[0] || null;
 }
 
-async function getOrCreateWaitingTrip(client, { direction, stationId, zoneId, seats, policySnapshot, maxCapacity }) {
+async function getOrCreateWaitingTrip(client, { direction, stationId, zoneId, seats, policySnapshot, maxCapacity, syntheticDemo=false }) {
     const lockKey = `drt:${direction}:${stationId}:${zoneId}`;
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
     const { rows: trips } = await client.query(`
       SELECT trip_id, dispatch_policy, dispatch_deadline FROM trip
       WHERE trip_direction=$1 AND station_id=$2 AND zone_id=$3 AND trip_status='WAITING_FOR_PASSENGERS'
+        AND NOT EXISTS(SELECT 1 FROM booking b JOIN users u ON u.user_id=b.user_id
+          WHERE b.trip_id=trip.trip_id AND UPPER(b.booking_status) IN ${ACTIVE_BOOKING_STATES}
+            AND (COALESCE(u.is_demo,FALSE) AND COALESCE(b.idempotency_key LIKE 'demo-ghost:%',FALSE)) IS DISTINCT FROM $4::boolean)
       ORDER BY dispatch_started_at ASC LIMIT 1 FOR UPDATE
-    `, [direction, stationId, zoneId]);
+    `, [direction, stationId, zoneId, Boolean(syntheticDemo)]);
     if (trips[0]) {
         const used = await client.query(`SELECT COALESCE(SUM(seats_reserved),0)::int AS seats FROM booking WHERE trip_id=$1 AND UPPER(booking_status) IN ${ACTIVE_BOOKING_STATES}`, [trips[0].trip_id]);
         if (Number(used.rows[0].seats) + seats <= maxCapacity) return { tripId: trips[0].trip_id, created: false };

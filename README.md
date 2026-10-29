@@ -98,24 +98,26 @@ It requires a reachable PostgreSQL/PostGIS database with migrations `001` throug
 
 ## Optional Demo Fleet
 
-The local demo simulator creates explicitly flagged `DEMO` driver/passenger accounts, maintains fresh eligible locations for idle demo drivers, and leaves all trip assignment to the normal dispatch worker. It never fabricates passenger boarding or trip completion. Keep it disabled outside a local demonstration; it refuses to start with `NODE_ENV=production`.
+The local demo simulator creates explicitly flagged `DEMO` driver/passenger accounts, maintains fresh eligible locations for idle demo drivers, and leaves all trip assignment to the normal dispatch worker. It can move and complete synthetic ghost-passenger trips through the normal route, boarding OTP, and stop-completion rules. It only advances trips made entirely from synthetic ghost bookings; bookings created manually by demo account users still require the normal passenger and driver actions. Keep it disabled outside a local demonstration; it refuses to start with `NODE_ENV=production`.
 
 Apply migration `007_demo_accounts.sql`, then set these values in `backend/.env` (do not commit the file):
 
 ```dotenv
 DEMO_SIMULATION_ENABLED=true
-DEMO_M2R_AVAILABLE_TARGET=3
-DEMO_R2M_AVAILABLE_TARGET=3
-DEMO_DRIVER_POOL_SIZE_PER_DIRECTION=6
+DEMO_M2R_AVAILABLE_TARGET=6
+DEMO_R2M_AVAILABLE_TARGET=6
+DEMO_DRIVER_POOL_SIZE_PER_DIRECTION=12
+DEMO_PASSENGER_POOL_SIZE=12
 DEMO_DRIVER_MOVEMENT_ENABLED=true
 DEMO_DRIVER_LOCATION_UPDATE_INTERVAL_MS=5000
 DEMO_GHOST_PASSENGERS_ENABLED=false
 DEMO_GHOST_PASSENGER_INTERVAL_SECONDS=60
-DEMO_MAX_ACTIVE_GHOST_BOOKINGS=6
+DEMO_MAX_ACTIVE_GHOST_BOOKINGS=12
+DEMO_AUTO_COMPLETE_TRIPS=true
 DEMO_ACCOUNT_PASSWORD=63f5aa28b118349f39f2ca9461cebd8f
 ```
 
-The driver pool is six per direction (12 total); target three means at least three normal, eligible drivers per direction when their pool has capacity. Seed legitimate station, active zones, verified service points, and operating policies first. Then, from `backend`, run:
+The demo pool is twelve drivers per direction (24 total) and twelve passengers; the active synthetic-booking cap is twelve. Driver and passenger pool sizes are configurable from 1 to 50. The target is the number of normally eligible drivers desired in each direction. Seed legitimate station, active zones, verified service points, and operating policies first. Then, from `backend`, run:
 
 ```powershell
 npm run demo:seed
@@ -123,11 +125,21 @@ npm run demo:inspect
 npm run dev
 ```
 
-Demo driver emails are `cmrl.demo.m2r.01@example.test` through `.06@example.test` and `cmrl.demo.r2m.01@example.test` through `.06@example.test`. Demo passenger emails are `cmrl.demo.passenger.01@example.test` onward. Sign in with the local `DEMO_ACCOUNT_PASSWORD`; the seed and inspect commands never print passwords. The accounts are explicitly labeled DEMO and can be logged into through the existing Driver/Passenger forms. Existing configured coordinates are used: M2R drivers start at the configured station and R2M drivers rotate among verified road pickup points. With movement disabled, each keeps a fixed legitimate coordinate while its timestamp refreshes. Drivers on active trips are never moved or made available by the simulator.
+Demo driver emails are `cmrl.demo.m2r.01@example.test` through `.12@example.test` and `cmrl.demo.r2m.01@example.test` through `.12@example.test`. Demo passenger emails are `cmrl.demo.passenger.01@example.test` onward. Re-run `npm run demo:seed` after changing pool sizes; it adds or refreshes configured demo accounts, preserves drivers with active trips, and never removes bookings or history. Ghost passenger selection rotates among accounts with the fewest previous synthetic bookings. Sign in with the local `DEMO_ACCOUNT_PASSWORD`; the seed and inspect commands never print passwords. The accounts are explicitly labeled DEMO and can be logged into through the existing Driver/Passenger forms. Existing configured coordinates are used: M2R drivers start at the configured station and R2M drivers rotate among verified road pickup points. With movement disabled, each keeps a fixed legitimate coordinate while its timestamp refreshes. Drivers on active trips are never moved or made available by the simulator.
 
-Ghost passenger requests are disabled by default. To enable them for a controlled local demonstration, set `DEMO_GHOST_PASSENGERS_ENABLED=true` and restart the backend. The service uses flagged demo passenger accounts, the existing fare preview and booking service, valid configured geography, unique idempotency keys, the normal shared queue, and the configured active-booking cap. Set it back to `false` and restart to stop new demand; existing bookings remain ordinary records and should be resolved or cancelled through the app. The admin dashboard shows DEMO pool counts, target shortfalls, last location update, errors, vehicles, and active synthetic bookings; demo map markers are labeled DEMO.
+Ghost passenger requests are disabled by default. To enable them for a controlled local demonstration, set `DEMO_GHOST_PASSENGERS_ENABLED=true` and restart the backend. The service uses flagged demo passenger accounts, the existing fare preview and booking service, valid configured geography, unique idempotency keys, the normal shared queue, and the configured active-booking cap. With `DEMO_AUTO_COMPLETE_TRIPS=true` and `DEMO_DRIVER_MOVEMENT_ENABLED=true`, the simulator moves synthetic trips one stop per location-update interval, boards synthetic passengers using an internal OTP, completes each stop in order, and refreshes the CSV when a trip finishes. Set auto-completion to `false` to leave route actions manual. Set ghost passenger creation back to `false` and restart to stop new demand; existing synthetic trips continue to completion when auto-completion remains enabled. The admin dashboard shows DEMO pool counts, target shortfalls, last location update, errors, vehicles, active synthetic bookings, and whether automatic synthetic trip completion is enabled; demo map markers are labeled DEMO.
 
 Demo booking history is stored in PostgreSQL. The backend refreshes `backend/exports/demo-trip-history.csv` when it creates a synthetic booking and after a driver completes a stop on a trip with demo passengers. The CSV includes demo booking source/status, fare and fare breakdown, requested/dispatch/arrival/boarding/completion timestamps, cab duration (boarding to passenger completion), and full trip duration (dispatch to trip completion). It excludes non-demo passenger accounts, OTPs, and passwords. To create or refresh the CSV at any time, run `npm run demo:export` from `backend`. The file is ignored by Git and can be opened in Excel.
+
+### Admin Data Analytics
+
+The admin dashboard has a **Data Analaytics** button at its bottom, opening `/admin/analytics`. Analytics reads the local `backend/exports/demo-trip-history.csv`; set `DEMO_TRIP_HISTORY_CSV` in `backend/.env` only when using another server-side CSV path. If the default file is missing, the service checks the local `export/demo-trip-history.csv` and `backend/export/demo-trip-history.csv` alternatives. It never accepts a filesystem path from a browser request. Generate current data with `npm run demo:export` from `backend`.
+
+The page fits separate Multiple Linear Regression models: fare uses distance, request time, the operating-policy peak flag, direction, and a distance/peak interaction; duration uses distance and boarding time with the same policy and direction features. Time of day is encoded cyclically. Fare training prefers a valid `final_fare`, then uses `fare_amount`. Duration training only uses completed passenger bookings and measures `boarded_at_utc` through `booking_completed_at_utc`; it does not use full trip duration or dispatch waiting time. Neither model changes live fare calculation or dispatch.
+
+The models use a deterministic 80/20 holdout grouped by trip, and report actual held-out MAE and RMSE. R² appears only when meaningful. A model needs at least 20 usable rows across 8 distinct trips and a full-rank feature matrix; otherwise the page reports insufficient data or rank deficiency without metrics or predictions. The cache fingerprint includes the CSV content and active operating peak policy, so changes cause retraining while unchanged requests reuse the fitted models.
+
+Private-vehicle inputs (petrol price, fuel efficiency, parking, road-distance adjustment, and rush/off-peak travel-time benchmarks) are entered by the admin and saved in that browser's local storage. They are personal comparison assumptions, not verified averages. Estimated car cost includes fuel and parking only. Since the demo CSV distance is a straight-line estimate, use an actual road distance or adjust it with the entered multiplier. The page compares the predicted fare/time with those inputs and may show either option as cheaper or faster. Small demo samples, incomplete trips, or straight-line distances can make estimates weak; results are not guaranteed outcomes.
 
 To reset availability without deleting demo accounts or history, stop the backend, set `DEMO_SIMULATION_ENABLED=false`, then run `npm run demo:reset` from `backend`. The command preserves drivers assigned to active trips, all vehicles, bookings, and history. The simulator does not delete data.
 

@@ -1,4 +1,21 @@
 const services = require("./dashboardServices");
+const analyticsService = require("./analyticsService");
+
+async function getAnalytics(request, reply) {
+    try { return reply.send(await analyticsService.getAnalytics()); }
+    catch(error) {
+        request.log.error(error);
+        return reply.code(error.statusCode || 500).send({message:error.statusCode?error.message:"Unable to load analytics."});
+    }
+}
+
+async function predictAnalytics(request, reply) {
+    try { return reply.send(await analyticsService.predictScenario(request.body || {})); }
+    catch(error) {
+        if(!error.statusCode) request.log.error(error);
+        return reply.code(error.statusCode || 500).send({message:error.statusCode?error.message:"Unable to calculate analytics prediction."});
+    }
+}
 
 async function getSummary(request, reply) {
     try {
@@ -52,6 +69,8 @@ module.exports = {
     getMapData,
     getOperations,
     getDemoFleet,
+    getAnalytics,
+    predictAnalytics,
     getPolicies,
     patchFarePolicy,
     patchOperatingPolicy

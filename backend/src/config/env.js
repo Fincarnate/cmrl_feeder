@@ -37,15 +37,18 @@ module.exports = {
     demo: {
         enabled: process.env.DEMO_SIMULATION_ENABLED === "true",
         nodeEnv: process.env.NODE_ENV || "development",
-        m2rAvailableTarget: Number(process.env.DEMO_M2R_AVAILABLE_TARGET || 3),
-        r2mAvailableTarget: Number(process.env.DEMO_R2M_AVAILABLE_TARGET || 3),
-        driverPoolSizePerDirection: Number(process.env.DEMO_DRIVER_POOL_SIZE_PER_DIRECTION || 6),
+        m2rAvailableTarget: Number(process.env.DEMO_M2R_AVAILABLE_TARGET || 6),
+        r2mAvailableTarget: Number(process.env.DEMO_R2M_AVAILABLE_TARGET || 6),
+        driverPoolSizePerDirection: Number(process.env.DEMO_DRIVER_POOL_SIZE_PER_DIRECTION || 12),
+        passengerPoolSize: Number(process.env.DEMO_PASSENGER_POOL_SIZE || 12),
         movementEnabled: process.env.DEMO_DRIVER_MOVEMENT_ENABLED !== "false",
         locationUpdateIntervalMs: Number(process.env.DEMO_DRIVER_LOCATION_UPDATE_INTERVAL_MS || 5000),
         ghostPassengersEnabled: process.env.DEMO_GHOST_PASSENGERS_ENABLED === "true",
         ghostPassengerIntervalSeconds: Number(process.env.DEMO_GHOST_PASSENGER_INTERVAL_SECONDS || 60),
-        maxActiveGhostBookings: Number(process.env.DEMO_MAX_ACTIVE_GHOST_BOOKINGS || 6),
-        accountPassword: process.env.DEMO_ACCOUNT_PASSWORD || ""
+        maxActiveGhostBookings: Number(process.env.DEMO_MAX_ACTIVE_GHOST_BOOKINGS || 12),
+        autoCompleteTrips: process.env.DEMO_AUTO_COMPLETE_TRIPS !== "false",
+        accountPassword: process.env.DEMO_ACCOUNT_PASSWORD || "",
+        tripHistoryCsv: process.env.DEMO_TRIP_HISTORY_CSV || ""
     },
 
     db: {

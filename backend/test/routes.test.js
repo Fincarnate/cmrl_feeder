@@ -23,6 +23,26 @@ test("protected DRT routes reject missing credentials and wrong roles", async t 
     assert.equal(invalidRequest.statusCode, 400);
 });
 
+test("analytics endpoints require an authenticated ADMIN identity", async t => {
+    const app = buildApp();
+    t.after(() => app.close());
+    await app.ready();
+
+    for (const [method, url] of [["GET", "/api/dashboard/analytics"], ["POST", "/api/dashboard/analytics/predict"]]) {
+        const missing = await app.inject({ method, url, ...(method === "POST" ? { payload: {} } : {}) });
+        assert.equal(missing.statusCode, 401);
+    }
+    for (const role of ["PASSENGER", "DRIVER"]) {
+        const identity = role === "PASSENGER" ? "33333333-3333-4333-8333-333333333333" : "44444444-4444-4444-8444-444444444444";
+        const token = generateToken({ id: identity, email: role.toLowerCase() + "@example.invalid", role });
+        const headers = { authorization: "Bearer " + token };
+        const get = await app.inject({ method: "GET", url: "/api/dashboard/analytics", headers });
+        const post = await app.inject({ method: "POST", url: "/api/dashboard/analytics/predict", headers, payload: {} });
+        assert.equal(get.statusCode, 403, role + " GET");
+        assert.equal(post.statusCode, 403, role + " POST");
+    }
+});
+
 test("driver telemetry validates coordinates before database access", async t => {
     const app = buildApp();
     t.after(() => app.close());

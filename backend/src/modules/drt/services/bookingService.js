@@ -192,10 +192,16 @@ async function createBookingInTransaction(client,userId,input,options={}) {
     if(options.requireQuote!==false)validateQuoteToken(input,fare,scheduledAt);
     if(seats>effectivePolicy.maximumVehicleCapacity)throw invalid("Requested seats exceed the configured maximum vehicle capacity.");
     const bookingIntent=input.bookingIntent||"BOOKING";
+    let syntheticDemo=false;
+    if(input.idempotencyKey?.startsWith("demo-ghost:")){
+        const account=await client.query("SELECT is_demo FROM users WHERE user_id=$1",[userId]);
+        syntheticDemo=account.rows[0]?.is_demo===true;
+        if(!syntheticDemo)throw invalid("The demo synthetic booking key is reserved for demo passenger accounts.");
+    }
     const trip=bookingIntent==="DIRECT"
       ? await createDirectTrip(client,input,context,effectivePolicy,seats)
       : await bookingQueries.getOrCreateWaitingTrip(client,{direction:input.direction,stationId:input.stationId,
-        zoneId:context.zone_id,seats,policySnapshot:effectivePolicy,maxCapacity:effectivePolicy.maximumVehicleCapacity});
+        zoneId:context.zone_id,seats,policySnapshot:effectivePolicy,maxCapacity:effectivePolicy.maximumVehicleCapacity,syntheticDemo});
     const coordinates=originCoordinates(input);
     const booking=await bookingQueries.insertBooking(client,{userId,tripId:trip.tripId,servicePointId:context.point_id,seats,
         direction:input.direction,stationId:context.station_id,zoneId:context.zone_id,fare,idempotencyKey:input.idempotencyKey,

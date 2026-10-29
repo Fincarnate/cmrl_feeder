@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import ServiceMap from "../components/ServiceMap";
 import "leaflet/dist/leaflet.css";
 
 function DashboardPage({ session, onLogout }) {
+    const navigate = useNavigate();
     const [summary, setSummary] = useState(null);
     const [mapData, setMapData] = useState(null);
     const [error, setError] = useState("");
@@ -78,7 +80,7 @@ function DashboardPage({ session, onLogout }) {
                     </div>
                     <div className="map-heading"><div><h2>Service network</h2><p>{updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : "Waiting for first update"} · refreshes every 2 seconds</p></div></div>
                     {demoFleet && <section className="drt-panel"><h2>Demo fleet</h2>{!demoFleet.enabled?<p>Simulator disabled. Enable it in backend/.env for a local demonstration.</p>:<>
-                        <p>DEMO simulator enabled · {demoFleet.movementEnabled?"moving":"stationary"} locations · Ghost passengers {demoFleet.ghostPassengersEnabled?"enabled":"disabled"}</p>
+                        <p>DEMO simulator enabled · {demoFleet.movementEnabled?"moving":"stationary"} locations · Ghost passengers {demoFleet.ghostPassengersEnabled?"enabled":"disabled"} · Synthetic trip completion {demoFleet.autoCompleteTrips&&demoFleet.movementEnabled?"enabled":"disabled"}</p>
                         <div className="dashboard-stats">{["M2R","R2M"].map(direction=><article key={direction}><span>DEMO {direction}</span><strong>{demoFleet.drivers?.[direction]?.available||0} available</strong><small>Target {demoFleet.target?.[direction]} · {demoFleet.drivers?.[direction]?.busy||0} busy · {demoFleet.drivers?.[direction]?.vehicles||0} vehicles</small></article>)}<article><span>DEMO synthetic bookings</span><strong>{demoFleet.activeGhostBookings}</strong><small>{demoFleet.poolSize} demo drivers · latest fix {demoFleet.lastUpdateAt?new Date(demoFleet.lastUpdateAt).toLocaleTimeString():"not updated"}</small></article></div>
                         {(demoFleet.shortfalls?.M2R||demoFleet.shortfalls?.R2M)&&<p className="dashboard-alert">DEMO pool shortfall · M2R: {demoFleet.shortfalls.M2R||0}, R2M: {demoFleet.shortfalls.R2M||0}</p>}{demoFleet.lastError&&<p className="dashboard-alert">DEMO simulator error: {demoFleet.lastError}</p>}
                     </>}</section>}
@@ -97,6 +99,7 @@ function DashboardPage({ session, onLogout }) {
                     {policyMessage&&<p className="login-success" role="status">{policyMessage}</p>}
                     </>
                 ) : null}
+                <div className="analytics-dashboard-link"><button type="button" onClick={() => navigate("/admin/analytics")}>Data Analaytics</button></div>
             </div>
         </main>
     );

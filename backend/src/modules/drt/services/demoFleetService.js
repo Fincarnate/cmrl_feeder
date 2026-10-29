@@ -3,6 +3,7 @@ const config=require("../../../config/env");
 const policyQueries=require("../queries/policyQueries");
 const bookingService=require("./bookingService");
 const {exportDemoTripHistory}=require("./demoCsvExportService");
+const {advanceSyntheticDemoTrips}=require("./demoTripProgressService");
 
 let singleton=null;
 
@@ -19,6 +20,11 @@ function validateDemoConfig(demo=config.demo,nodeEnv=process.env.NODE_ENV||"deve
         throw new Error("DEMO_GHOST_PASSENGER_INTERVAL_SECONDS must be from 10 to 86400.");
     if(!Number.isInteger(demo.maxActiveGhostBookings)||demo.maxActiveGhostBookings<1||demo.maxActiveGhostBookings>50)
         throw new Error("DEMO_MAX_ACTIVE_GHOST_BOOKINGS must be from 1 to 50.");
+    const passengerPoolSize=Number(demo.passengerPoolSize??demo.maxActiveGhostBookings);
+    if(!Number.isInteger(passengerPoolSize)||passengerPoolSize<1||passengerPoolSize>50)
+        throw new Error("DEMO_PASSENGER_POOL_SIZE must be an integer from 1 to 50.");
+    if(demo.maxActiveGhostBookings>passengerPoolSize)
+        throw new Error("DEMO_MAX_ACTIVE_GHOST_BOOKINGS cannot exceed DEMO_PASSENGER_POOL_SIZE.");
 }
 
 function directionName(value){return value==="R2M"?"RESIDENTIAL_TO_METRO":"METRO_TO_RESIDENTIAL";}
@@ -125,7 +131,9 @@ function createDemoFleetService({database=pool,logger,settings=config.demo,envir
           ) service
           WHERE u.is_demo=TRUE AND NOT EXISTS(SELECT 1 FROM booking b WHERE b.user_id=u.user_id
             AND b.booking_status IN ('REQUESTED','ASSIGNED','BOARDING','IN_PROGRESS'))
-          ORDER BY u.email LIMIT 1`);
+          ORDER BY (SELECT COUNT(*) FROM booking history WHERE history.user_id=u.user_id AND history.idempotency_key LIKE 'demo-ghost:%'),
+            (SELECT MAX(history.created_at) FROM booking history WHERE history.user_id=u.user_id AND history.idempotency_key LIKE 'demo-ghost:%') NULLS FIRST,
+            u.email LIMIT 1`);
         const passenger=candidates.rows[0];if(!passenger)return false;
         const direction=ghostSequence++%2===0?"RESIDENTIAL_TO_METRO":"METRO_TO_RESIDENTIAL";
         const operating=await policyQueries.activeOperating(database);
@@ -145,7 +153,7 @@ function createDemoFleetService({database=pool,logger,settings=config.demo,envir
     async function iteration(){
         if(stopped||active)return;
         active=true;
-        try {const result=await refreshIdleDrivers();await maybeCreateGhostBooking();lastError=null;logger?.debug({event:"demo_fleet_refreshed",shortfalls},"Refreshed eligible idle demo drivers.");return result;}
+        try {const result=await refreshIdleDrivers();const progress=await advanceSyntheticDemoTrips({database,settings,logger});await maybeCreateGhostBooking();lastError=progress.lastError;logger?.debug({event:"demo_fleet_refreshed",shortfalls,advancedStops:progress.advanced,completedTrips:progress.completed},"Refreshed eligible idle demo drivers.");return result;}
         catch(error){lastError=error.message;logger?.error({event:"demo_fleet_error",message:error.message},"Demo fleet iteration failed.");}
         finally{active=false;if(!stopped)timer=setTimeout(iteration,settings.locationUpdateIntervalMs);}
     }
@@ -158,7 +166,7 @@ function createDemoFleetService({database=pool,logger,settings=config.demo,envir
         },
         async stop(){stopped=true;if(timer)clearTimeout(timer);while(active)await new Promise(resolve=>setTimeout(resolve,20));logger?.info({event:"demo_fleet_stopped"},"Demo fleet simulator stopped.");},
         async getStatus(){
-            if(!settings.enabled)return {enabled:false,shortfalls:{},lastUpdateAt:null,lastError:null,ghostPassengersEnabled:false,drivers:{},vehicles:0,activeGhostBookings:0};
+            if(!settings.enabled)return {enabled:false,shortfalls:{},lastUpdateAt:null,lastError:null,ghostPassengersEnabled:false,autoCompleteTrips:false,drivers:{},vehicles:0,activeGhostBookings:0};
             const {rows}=await database.query(`SELECT CASE WHEN UPPER(TRIM(d.current_service_mode)) IN ('M2R','METRO_TO_RESIDENTIAL') THEN 'M2R'
               WHEN UPPER(TRIM(d.current_service_mode)) IN ('R2M','RESIDENTIAL_TO_METRO') THEN 'R2M' END AS direction,
               COUNT(DISTINCT d.driver_id) FILTER(WHERE d.is_online)::int AS online,COUNT(DISTINCT d.driver_id) FILTER(WHERE d.is_online AND UPPER(d.shift_status) IN ('AVAILABLE','ONLINE')
@@ -172,7 +180,7 @@ function createDemoFleetService({database=pool,logger,settings=config.demo,envir
             const ghost=await database.query(`SELECT COUNT(*)::int AS count FROM booking b JOIN users u ON u.user_id=b.user_id WHERE u.is_demo=TRUE AND b.booking_status IN ('REQUESTED','ASSIGNED','BOARDING','IN_PROGRESS')`);
             const drivers=Object.fromEntries(rows.map(row=>[row.direction,{online:row.online,available:row.available,busy:row.busy,vehicles:row.vehicles,latestUpdate:row.latest_update}]));
             const poolSize=(await database.query("SELECT COUNT(*)::int AS count FROM driver WHERE is_demo=TRUE")).rows[0].count;
-            return {enabled:true,movementEnabled:settings.movementEnabled,ghostPassengersEnabled:settings.ghostPassengersEnabled,
+            return {enabled:true,movementEnabled:settings.movementEnabled,ghostPassengersEnabled:settings.ghostPassengersEnabled,autoCompleteTrips:settings.autoCompleteTrips,
               target:{M2R:settings.m2rAvailableTarget,R2M:settings.r2mAvailableTarget},poolSize,lastUpdateAt,lastError,shortfalls,
               drivers,vehicles:rows.reduce((sum,row)=>sum+Number(row.vehicles),0),activeGhostBookings:Number(ghost.rows[0].count)};
         }
