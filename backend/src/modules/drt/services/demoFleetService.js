@@ -120,20 +120,27 @@ function createDemoFleetService({database=pool,logger,settings=config.demo,envir
         const active=await database.query(`SELECT COUNT(*)::int AS count FROM booking b JOIN users u ON u.user_id=b.user_id
           WHERE u.is_demo=TRUE AND b.booking_status IN ('REQUESTED','ASSIGNED','BOARDING','IN_PROGRESS')`);
         if(Number(active.rows[0].count)>=settings.maxActiveGhostBookings)return false;
+        const bookingSequence=ghostSequence;
         const candidates=await database.query(`SELECT u.user_id,u.full_name,u.email,service.station_id,service.zone_id,service.point_id
           FROM users u CROSS JOIN LATERAL (
-            SELECT ms.station_id,sz.zone_id,sp.point_id FROM metro_station ms JOIN service_zone sz ON sz.station_id=ms.station_id
-            JOIN service_point sp ON sp.zone_id=sz.zone_id
-            WHERE ms.is_active=TRUE AND sz.is_active=TRUE AND sp.is_active=TRUE AND sp.verification_status='VERIFIED'
-              AND ms.station_coords IS NOT NULL AND ms.service_area_polygon IS NOT NULL AND sz.boundary_polygon IS NOT NULL
-              AND sz.center_coords IS NOT NULL AND ST_Covers(ms.service_area_polygon,sz.center_coords)
-              AND ST_Covers(sz.boundary_polygon,sp.location_coords) ORDER BY ms.station_name,sz.zone_name,sp.point_name LIMIT 1
+            SELECT points.station_id,points.zone_id,points.point_id FROM (
+              SELECT ms.station_id,sz.zone_id,sp.point_id,
+                ROW_NUMBER() OVER(ORDER BY ms.station_name,sz.zone_name,sp.point_name,sp.point_id)-1 AS point_index,
+                COUNT(*) OVER() AS point_count
+              FROM metro_station ms JOIN service_zone sz ON sz.station_id=ms.station_id
+              JOIN service_point sp ON sp.zone_id=sz.zone_id
+              WHERE ms.is_active=TRUE AND sz.is_active=TRUE AND sp.is_active=TRUE AND sp.verification_status='VERIFIED'
+                AND ms.station_coords IS NOT NULL AND ms.service_area_polygon IS NOT NULL AND sz.boundary_polygon IS NOT NULL
+                AND sz.center_coords IS NOT NULL AND ST_Covers(ms.service_area_polygon,sz.center_coords)
+                AND ST_Covers(sz.boundary_polygon,sp.location_coords)
+            ) points
+            WHERE points.point_index=($1::int%points.point_count) LIMIT 1
           ) service
           WHERE u.is_demo=TRUE AND NOT EXISTS(SELECT 1 FROM booking b WHERE b.user_id=u.user_id
             AND b.booking_status IN ('REQUESTED','ASSIGNED','BOARDING','IN_PROGRESS'))
           ORDER BY (SELECT COUNT(*) FROM booking history WHERE history.user_id=u.user_id AND history.idempotency_key LIKE 'demo-ghost:%'),
             (SELECT MAX(history.created_at) FROM booking history WHERE history.user_id=u.user_id AND history.idempotency_key LIKE 'demo-ghost:%') NULLS FIRST,
-            u.email LIMIT 1`);
+            u.email LIMIT 1`,[bookingSequence]);
         const passenger=candidates.rows[0];if(!passenger)return false;
         const direction=ghostSequence++%2===0?"RESIDENTIAL_TO_METRO":"METRO_TO_RESIDENTIAL";
         const operating=await policyQueries.activeOperating(database);

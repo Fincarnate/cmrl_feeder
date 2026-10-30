@@ -115,6 +115,51 @@ test("dataset fingerprint cache reuses a fit until content changes, then retrain
     assert.equal(refreshed.response.dataset.totalRows, 44);
 });
 
+test("model-specific test cases use the trained models and policy-local time inputs", async t => {
+    const directory = await temporaryDirectory(t);
+    const file = path.join(directory, "demo-trip-history.csv");
+    await fs.writeFile(file, csvRows(40));
+    analytics.resetAnalyticsCache();
+    const options = { datasetPath: file, loadOperatingPolicy };
+    for (const modelType of ["fare", "duration"]) {
+        const result = await analytics.predictScenario({
+            modelType, direction: "R2M", distanceKm: 5, departureTime: "08:00"
+        }, options);
+        assert.equal(result.modelType, modelType);
+        assert.equal(result.prediction.available, true);
+        assert.ok(Number.isFinite(result.prediction.value));
+        assert.equal(result.prediction.units, modelType === "fare" ? "INR" : "minutes");
+        assert.equal(result.prediction.currency, modelType === "fare" ? "INR" : null);
+        assert.equal(result.scenario.localTime, "08:00");
+        assert.match(result.scenario.localDate, /^\d{4}-\d{2}-\d{2}$/);
+        assert.equal(result.scenario.timezone, policy.timezone);
+        assert.equal(result.scenario.period, "PEAK");
+        assert.equal(result.model.targetRows, 40);
+        assert.ok(result.model.trainedAt);
+        assert.ok(result.model.featureNames.includes("distance_peak_interaction"));
+        assert.deepEqual(result.model.excludedFeatureNames, []);
+        assert.equal(result.scenario.inputFeatures.isPeak, true);
+    }
+    const fareNear = await analytics.predictScenario({ modelType: "fare", direction: "R2M", distanceKm: 2, departureTime: "08:00" }, options);
+    const fareFar = await analytics.predictScenario({ modelType: "fare", direction: "R2M", distanceKm: 12, departureTime: "08:00" }, options);
+    assert.notEqual(fareNear.prediction.value, fareFar.prediction.value);
+    await assert.rejects(analytics.predictScenario({ modelType: "trip", direction: "R2M", distanceKm: 2, departureTime: "08:00" }, options), /fare or duration/i);
+    await assert.rejects(analytics.predictScenario({ modelType: "fare", direction: "R2M", distanceKm: 2, departureTime: "25:00" }, options), /HH:MM/i);
+});
+
+test("model-specific prediction reports insufficient training without a fabricated value", async t => {
+    const directory = await temporaryDirectory(t);
+    const file = path.join(directory, "small.csv");
+    await fs.writeFile(file, csvRows(4));
+    analytics.resetAnalyticsCache();
+    const result = await analytics.predictScenario({
+        modelType: "duration", direction: "M2R", distanceKm: 4, departureTime: "18:00"
+    }, { datasetPath: file, loadOperatingPolicy });
+    assert.equal(result.prediction.available, false);
+    assert.match(result.prediction.reason, /at least 20 usable rows/i);
+    assert.equal("value" in result.prediction, false);
+});
+
 test("insufficient training rows are reported without fabricated metrics", async t => {
     const directory = await temporaryDirectory(t);
     const file = path.join(directory, "small.csv");
@@ -142,4 +187,9 @@ test("rank-deficient feature datasets do not publish predictions or metrics", as
     const entry = await analytics.getAnalyticsEntry({ datasetPath: file, loadOperatingPolicy });
     assert.equal(entry.response.models.fare.status, "RANK_DEFICIENT");
     assert.equal(entry.response.models.fare.evaluation, null);
+    const prediction = await analytics.predictScenario({ modelType: "fare", direction: "R2M", distanceKm: 3, departureTime: "08:00" },
+        { datasetPath: file, loadOperatingPolicy });
+    assert.equal(prediction.prediction.available, false);
+    assert.equal(prediction.prediction.status, "RANK_DEFICIENT");
+    assert.equal("value" in prediction.prediction, false);
 });

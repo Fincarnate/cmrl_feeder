@@ -119,6 +119,21 @@ test("training reports insufficient rows and detects rank-deficient features", (
     assert.equal(trainTarget(constant).status, "RANK_DEFICIENT");
 });
 
+test("training omits only a feature that is redundant in this dataset", () => {
+    const rows = makeTrainingRows().map(row => ({
+        ...row,
+        // Mirrors a dataset where peak trips all have the same distance, making
+        // distance-by-peak indistinguishable from the peak indicator itself.
+        features: [...row.features.slice(0, 5), row.features[3] * 0.852]
+    }));
+    const model = trainTarget(rows);
+    assert.equal(model.status, "READY");
+    assert.ok(model.predictionModel.featureIndexes.includes(0));
+    assert.ok(model.predictionModel.excludedFeatureIndexes.includes(5));
+    assert.ok(Number.isFinite(predictModel(model.predictionModel, rows[0].features)));
+    assert.ok(model.evaluation.featuresOmitted.includes("distance_peak_interaction"));
+});
+
 test("scenario validation rejects invalid distance, direction, time, and period mismatch", () => {
     const base = { direction: "R2M", distanceKm: 3, departureAt: "2025-01-06T03:00:00Z" };
     assert.throws(() => validateScenario({ ...base, distanceKm: 0 }, policy), /distance/i);

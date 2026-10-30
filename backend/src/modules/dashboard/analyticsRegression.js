@@ -5,6 +5,7 @@ const MODEL_VERSION = "cmrl-demo-mlr-v1";
 const FEATURE_NAMES = ["distance_km", "hour_sin", "hour_cos", "is_peak", "direction_r2m", "distance_peak_interaction"];
 const MIN_ROWS = 20;
 const MIN_TRIPS = 8;
+const MIN_INDEPENDENT_FEATURES = 2;
 const EPSILON = 1e-10;
 
 function parseCsv(text) {
@@ -203,22 +204,63 @@ function solveLeastSquares(matrix, targets) {
 
 function fitModel(rows) {
     if (!rows.length) return { status: "INSUFFICIENT_TRAINING_DATA", reason: "No usable rows." };
-    const means = FEATURE_NAMES.map((_, index) => rows.reduce((sum, row) => sum + row.features[index], 0) / rows.length);
-    const scales = FEATURE_NAMES.map((_, index) => {
-        const variance = rows.reduce((sum, row) => sum + (row.features[index] - means[index]) ** 2, 0) / rows.length;
+    const allIndexes = FEATURE_NAMES.map((_, index) => index);
+    const meansByFeature = FEATURE_NAMES.map((_, index) => rows.reduce((sum, row) => sum + row.features[index], 0) / rows.length);
+    const scalesByFeature = FEATURE_NAMES.map((_, index) => {
+        const variance = rows.reduce((sum, row) => sum + (row.features[index] - meansByFeature[index]) ** 2, 0) / rows.length;
         return Math.sqrt(variance);
     });
-    if (scales.some(scale => !Number.isFinite(scale) || scale <= EPSILON))
-        return { status: "RANK_DEFICIENT", reason: "One or more required features have no variation in the training rows." };
-    const matrix = rows.map(row => [1, ...row.features.map((value, index) => (value - means[index]) / scales[index])]);
+
+    // Keep only features whose standardized values add independent information.
+    // A feature may be constant or redundant for a particular local dataset (for
+    // example, distance x peak is redundant when all peak trips share one distance).
+    const orthonormalBasis = [];
+    const featureIndexes = [], means = [], scales = [];
+    const rankTolerance = 1e-8 * Math.sqrt(rows.length);
+    for (const index of allIndexes) {
+        const scale = scalesByFeature[index];
+        if (!Number.isFinite(scale) || scale <= EPSILON) continue;
+        const normalized = rows.map(row => (row.features[index] - meansByFeature[index]) / scale);
+        const residual = normalized.slice();
+        for (let pass = 0; pass < 2; pass++) {
+            for (const basis of orthonormalBasis) {
+                const projection = residual.reduce((sum, value, rowIndex) => sum + value * basis[rowIndex], 0);
+                for (let rowIndex = 0; rowIndex < residual.length; rowIndex++) residual[rowIndex] -= projection * basis[rowIndex];
+            }
+        }
+        const residualNorm = Math.sqrt(residual.reduce((sum, value) => sum + value * value, 0));
+        if (!Number.isFinite(residualNorm) || residualNorm <= rankTolerance) continue;
+        orthonormalBasis.push(residual.map(value => value / residualNorm));
+        featureIndexes.push(index);
+        means.push(meansByFeature[index]);
+        scales.push(scale);
+    }
+    const excludedFeatureIndexes = allIndexes.filter(index => !featureIndexes.includes(index));
+    if (featureIndexes.length < MIN_INDEPENDENT_FEATURES) {
+        return {
+            status: "RANK_DEFICIENT",
+            reason: `Training data must contain at least ${MIN_INDEPENDENT_FEATURES} independent varying features.`,
+            featureIndexes,
+            excludedFeatureIndexes
+        };
+    }
+    const matrix = rows.map(row => [1, ...featureIndexes.map((index, featureIndex) =>
+        (row.features[index] - means[featureIndex]) / scales[featureIndex])]);
     const coefficients = solveLeastSquares(matrix, rows.map(row => row.target));
-    if (!coefficients) return { status: "RANK_DEFICIENT", reason: "The training feature matrix is rank deficient or numerically unstable." };
-    return { status: "READY", coefficients, means, scales };
+    if (!coefficients) return {
+        status: "RANK_DEFICIENT",
+        reason: "The selected training feature matrix is rank deficient or numerically unstable.",
+        featureIndexes,
+        excludedFeatureIndexes
+    };
+    return { status: "READY", coefficients, means, scales, featureIndexes, excludedFeatureIndexes };
 }
 
 function predictModel(model, features) {
     if (model?.status !== "READY" || !Array.isArray(features) || features.length !== FEATURE_NAMES.length) return null;
-    const values = [1, ...features.map((value, index) => (value - model.means[index]) / model.scales[index])];
+    const featureIndexes = model.featureIndexes || FEATURE_NAMES.map((_, index) => index);
+    const values = [1, ...featureIndexes.map((index, featureIndex) =>
+        (features[index] - model.means[featureIndex]) / model.scales[featureIndex])];
     const prediction = values.reduce((sum, value, index) => sum + value * model.coefficients[index], 0);
     return Number.isFinite(prediction) ? prediction : null;
 }
@@ -245,14 +287,26 @@ function trainTarget(rows) {
         return { ...base, status: "INSUFFICIENT_TRAINING_DATA", reason: `Need at least ${MIN_ROWS} usable rows across ${MIN_TRIPS} distinct trips.` };
     }
     const split = deterministicSplit(rows);
-    if (!split || split.train.length < FEATURE_NAMES.length + 2 || split.validation.length < 2)
+    if (!split || split.train.length < MIN_INDEPENDENT_FEATURES + 2 || split.validation.length < 2)
         return { ...base, status: "INSUFFICIENT_TRAINING_DATA", reason: "Not enough distinct trips for a grouped holdout evaluation." };
     const evaluationModel = fitModel(split.train);
-    if (evaluationModel.status !== "READY") return { ...base, status: evaluationModel.status, reason: `Grouped training split: ${evaluationModel.reason}` };
+    if (evaluationModel.status !== "READY") return {
+        ...base,
+        status: evaluationModel.status,
+        reason: `Grouped training split: ${evaluationModel.reason}`,
+        featureIndexes: evaluationModel.featureIndexes,
+        excludedFeatureIndexes: evaluationModel.excludedFeatureIndexes
+    };
     const metrics = evaluateModel(evaluationModel, split.validation);
     if (!metrics) return { ...base, status: "RANK_DEFICIENT", reason: "Could not evaluate the held-out trips safely." };
     const fullModel = fitModel(rows);
-    if (fullModel.status !== "READY") return { ...base, status: fullModel.status, reason: fullModel.reason };
+    if (fullModel.status !== "READY") return {
+        ...base,
+        status: fullModel.status,
+        reason: fullModel.reason,
+        featureIndexes: fullModel.featureIndexes,
+        excludedFeatureIndexes: fullModel.excludedFeatureIndexes
+    };
     return {
         ...base,
         status: "READY",
@@ -266,7 +320,9 @@ function trainTarget(rows) {
             validationTrips: split.validationTripCount,
             mae: metrics.mae,
             rmse: metrics.rmse,
-            rSquared: metrics.rSquared
+            rSquared: metrics.rSquared,
+            featuresUsed: fullModel.featureIndexes.map(index => FEATURE_NAMES[index]),
+            featuresOmitted: fullModel.excludedFeatureIndexes.map(index => FEATURE_NAMES[index])
         }
     };
 }
@@ -276,6 +332,7 @@ module.exports = {
     FEATURE_NAMES,
     MIN_ROWS,
     MIN_TRIPS,
+    MIN_INDEPENDENT_FEATURES,
     parseCsv,
     normalizeDirection,
     prepareTrainingData,

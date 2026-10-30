@@ -40,6 +40,13 @@ async function selectDataset(pathOverride = process.env.DEMO_TRIP_HISTORY_CSV) {
 }
 
 function modelSummary(model, exclusions, extras = {}) {
+    const featureIndexes = model.predictionModel?.featureIndexes || model.featureIndexes;
+    const included = Array.isArray(featureIndexes) ? featureIndexes : FEATURE_NAMES.map((_, index) => index);
+    const excluded = Array.isArray(model.predictionModel?.excludedFeatureIndexes)
+        ? model.predictionModel.excludedFeatureIndexes
+        : Array.isArray(model.excludedFeatureIndexes)
+            ? model.excludedFeatureIndexes
+            : FEATURE_NAMES.map((_, index) => index).filter(index => !included.includes(index));
     return {
         status: model.status,
         available: model.status === "READY",
@@ -51,7 +58,8 @@ function modelSummary(model, exclusions, extras = {}) {
         evaluation: model.evaluation || null,
         modelVersion: MODEL_VERSION,
         targetUnits: extras.targetUnits || null,
-        featureNames: FEATURE_NAMES
+        featureNames: included.map(index => FEATURE_NAMES[index]),
+        excludedFeatureNames: excluded.map(index => FEATURE_NAMES[index])
     };
 }
 
@@ -186,15 +194,52 @@ async function getAnalyticsEntry(options = {}) {
 
 function badRequest(message) { return Object.assign(new Error(message), { statusCode: 400 }); }
 
+function instantForPolicyTime(timeValue, policy, now = new Date()) {
+    const timezone = policy.timezone || "Asia/Kolkata";
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+    });
+    const get = (parts, type) => Number(parts.find(part => part.type === type)?.value);
+    const today = formatter.formatToParts(now);
+    const [hour, minute] = timeValue.split(":").map(Number);
+    const year = get(today, "year"), month = get(today, "month"), day = get(today, "day");
+    const desiredLocal = Date.UTC(year, month - 1, day, hour, minute);
+    let guess = desiredLocal;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const parts = formatter.formatToParts(new Date(guess));
+        const representedLocal = Date.UTC(get(parts, "year"), get(parts, "month") - 1, get(parts, "day"), get(parts, "hour"), get(parts, "minute"));
+        const difference = desiredLocal - representedLocal;
+        if (!difference) break;
+        guess += difference;
+    }
+    const resolved = new Date(guess);
+    const actual = formatter.formatToParts(resolved);
+    if (get(actual, "hour") !== hour || get(actual, "minute") !== minute)
+        throw badRequest("The selected local time does not exist today in the operating-policy timezone.");
+    return resolved;
+}
+
 function validateScenario(input, policy) {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw badRequest("Scenario details are required.");
     const direction = normalizeDirection(input.direction);
     if (!direction) throw badRequest("Choose R2M or M2R direction.");
     if (typeof input.distanceKm !== "number" || !Number.isFinite(input.distanceKm) || input.distanceKm <= 0 || input.distanceKm > 500)
         throw badRequest("Distance must be greater than 0 and no more than 500 km.");
-    if (typeof input.departureAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.departureAt))
-        throw badRequest("Choose a departure date and time with an explicit timezone.");
-    const departureAt = new Date(input.departureAt);
+    let departureAt;
+    if (input.departureTime !== undefined) {
+        if (input.departureAt !== undefined) throw badRequest("Provide either departureTime or departureAt, not both.");
+        if (typeof input.departureTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(input.departureTime))
+            throw badRequest("Choose a valid departure time in HH:MM format.");
+        try { departureAt = instantForPolicyTime(input.departureTime, policy); }
+        catch (error) {
+            if (error.statusCode) throw error;
+            throw Object.assign(new Error("The active operating policy has an invalid timezone."), { statusCode: 503 });
+        }
+    } else {
+        if (typeof input.departureAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.departureAt))
+            throw badRequest("Choose a departure date and time with an explicit timezone.");
+        departureAt = new Date(input.departureAt);
+    }
     if (!Number.isFinite(departureAt.getTime())) throw badRequest("Departure date and time are invalid.");
     let peak;
     try { peak = isPeakAt(departureAt, policy); }
@@ -218,6 +263,9 @@ async function getAnalytics(options) {
 }
 
 async function predictScenario(input, options) {
+    const modelType = input?.modelType;
+    if (modelType !== undefined && !["fare", "duration"].includes(modelType))
+        throw badRequest("Choose the fare or duration model.");
     const entry = await getAnalyticsEntry(options);
     const scenario = validateScenario(input, entry.policy);
     const local = localParts(scenario.departureAt, entry.policy.timezone || "Asia/Kolkata");
@@ -228,22 +276,61 @@ async function predictScenario(input, options) {
         isPeak: scenario.peak,
         timezone: entry.policy.timezone || "Asia/Kolkata"
     });
-    return {
-        scenario: {
-            direction: scenario.direction,
+    const localDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: entry.policy.timezone || "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(scenario.departureAt);
+    const scenarioResult = {
+        direction: scenario.direction,
+        distanceKm: scenario.distanceKm,
+        departureAt: scenario.departureAt.toISOString(),
+        localDate,
+        localTime: `${String(Math.floor(local.minute / 60)).padStart(2, "0")}:${String(local.minute % 60).padStart(2, "0")}`,
+        timezone: entry.policy.timezone || "Asia/Kolkata",
+        period: scenario.peak ? "PEAK" : "OFFPEAK",
+        inputFeatures: {
             distanceKm: scenario.distanceKm,
-            departureAt: scenario.departureAt.toISOString(),
-            localTime: `${String(Math.floor(local.minute / 60)).padStart(2, "0")}:${String(local.minute % 60).padStart(2, "0")}`,
-            timezone: entry.policy.timezone || "Asia/Kolkata",
-            period: scenario.peak ? "PEAK" : "OFFPEAK",
-            inputFeatures: {
-                distanceKm: scenario.distanceKm,
-                hourSin: Number(features[1].toFixed(6)),
-                hourCos: Number(features[2].toFixed(6)),
-                isPeak: scenario.peak,
-                direction: scenario.direction
-            }
-        },
+            hourSin: Number(features[1].toFixed(6)),
+            hourCos: Number(features[2].toFixed(6)),
+            isPeak: scenario.peak,
+            direction: scenario.direction,
+            distancePeakInteraction: Number(features[5].toFixed(6))
+        }
+    };
+    if (modelType) {
+        const modelSummary = entry.response.models[modelType];
+        const model = entry.models?.[modelType] || { status: modelSummary.status, reason: modelSummary.reason };
+        const units = modelType === "fare" ? "INR" : "minutes";
+        return {
+            modelType,
+            prediction: {
+                ...predictWithModel(model, features, units),
+                units,
+                currency: modelType === "fare" ? "INR" : null
+            },
+            model: {
+                status: modelSummary.status,
+                available: modelSummary.available,
+                reason: modelSummary.reason,
+                targetRows: modelSummary.targetRows,
+                distinctTrips: modelSummary.distinctTrips,
+                evaluation: modelSummary.evaluation,
+                featureNames: modelSummary.featureNames,
+                excludedFeatureNames: modelSummary.excludedFeatureNames,
+                modelVersion: entry.response.training.modelVersion,
+                trainedAt: entry.response.training.trainedAt
+            },
+            dataset: {
+                status: entry.response.dataset.status,
+                name: entry.response.dataset.name,
+                totalRows: entry.response.dataset.totalRows,
+                fingerprint: entry.response.dataset.fingerprint || null
+            },
+            scenario: scenarioResult,
+            datasetFingerprint: entry.fingerprint?.slice(0, 12) || null
+        };
+    }
+    return {
+        scenario: scenarioResult,
         predictions: {
             fare: predictWithModel(entry.models?.fare || entry.response.models.fare, features, "INR"),
             duration: predictWithModel(entry.models?.duration || entry.response.models.duration, features, "minutes")
